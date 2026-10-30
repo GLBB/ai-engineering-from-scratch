@@ -5,16 +5,17 @@ import dev.learning.agent.deepseek.model.AssistantTurn;
 import dev.learning.agent.deepseek.model.ChatMessage;
 import dev.learning.agent.deepseek.model.ToolCall;
 import dev.learning.agent.tool.ToolRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /** Controls message history, tool dispatch, and termination. */
 public final class AgentLoop {
-    private static final Logger LOG = Logger.getLogger(AgentLoop.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(AgentLoop.class);
     private final DeepSeekClient client;
     private final ToolRegistry tools;
     private final int maxTurns;
@@ -41,20 +42,20 @@ public final class AgentLoop {
         messages.add(ChatMessage.user(prompt));
         for (int turn = 0; turn < maxTurns; turn++) {
             int currentTurn = turn + 1;
-            LOG.info("Model turn " + currentTurn + "/" + maxTurns + "; history messages=" + messages.size());
+            LOG.info("Model turn {}/{}; history messages={}", currentTurn, maxTurns, messages.size());
             AssistantTurn answer = client.stream(List.copyOf(messages), tools.definitions(), onText);
-            LOG.info("Model turn " + currentTurn + " finished; reason=" + answer.finishReason()
-                    + "; tool calls=" + answer.calls().size() + "; text chars=" + answer.content().length());
+            LOG.info("Model turn {} finished; reason={}; tool calls={}; text chars={}",
+                    currentTurn, answer.finishReason(), answer.calls().size(), answer.content().length());
             if (!answer.calls().isEmpty()) {
                 if (!"tool_calls".equals(answer.finishReason()))
                     throw new IOException("DeepSeek returned tools with unexpected finish reason: " + answer.finishReason());
                 messages.add(ChatMessage.assistant(answer.content(), answer.calls()));
                 for (ToolCall call : answer.calls()) {
-                    LOG.info("Dispatching tool=" + call.function().name() + "; call id=" + call.id());
+                    LOG.info("Dispatching tool={}; call id={}", call.function().name(), call.id());
                     onTool.accept("tool: " + call.function().name());
                     String result = tools.dispatch(call);
                     messages.add(ChatMessage.tool(call.id(), result));
-                    LOG.info("Tool result recorded; chars=" + result.length());
+                    LOG.info("Tool result recorded; chars={}", result.length());
                 }
                 continue;
             }

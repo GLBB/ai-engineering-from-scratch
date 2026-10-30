@@ -19,7 +19,7 @@ mvn -q compile exec:java
 
 ## 日志
 
-运行时会自动创建 `logs/`，日志文件采用轮转方式保存，最多 5 个文件、每个约 1 MB。终端默认显示 `INFO` 级别的轮次、接口状态、工具执行和耗时；文件还保存 `FINE` 级别的 SSE 分片大小等细节。设置 `AGENT_LOG_LEVEL=FINE` 可以把细节也显示在终端。日志目录已加入 Git 忽略，不记录 API key 或完整 Bash 输出。
+使用 SLF4J + Logback，配置在 `src/main/resources/logback.xml`。运行时会自动创建项目下的 `logs/`；`agent.log` 是当前日志，每天归档、单个归档最多 1 MB，保留最近 5 天，归档总量上限 5 MB。终端默认显示 `INFO` 级别的轮次、接口状态、工具执行和耗时；文件还保存 `DEBUG` 级别的 SSE 分片大小等细节。设置 `AGENT_LOG_LEVEL=DEBUG` 可以把细节也显示在终端。日志文件已加入 Git 忽略，不记录 API key 或完整 Bash 输出。
 
 ## 在 IntelliJ IDEA 中
 
@@ -32,7 +32,7 @@ mvn -q compile exec:java
 - `deepseek/model/`：请求、消息、工具 Schema 和 SSE 响应实体。`ChatRequest.java` 列出了官方 Chat Completions 的顶层请求参数，并注明用途；本 demo 仅发送实际需要的字段。
 - `deepseek/`：HTTP 请求和流式 SSE 合并。
 - `tool/`：工具注册与具体工具。
-- `logging/`：控制台和项目日志配置。
+- `src/main/resources/logback.xml`：控制台和项目日志配置。
 - `AGENTS.md`：本项目的代码规范与安全边界。
 
 接口依据：[DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/)、[DeepSeek Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 和 [Exa Search](https://exa.ai/docs/reference/search)。

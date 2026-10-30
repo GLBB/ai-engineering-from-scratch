@@ -6,6 +6,8 @@ import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -14,11 +16,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
-import java.util.logging.Logger;
 
 /** Exa search adapter. Main supplies EXA_AI_KEY, with EXA_API_KEY as fallback. */
 public final class SearchTool implements AgentTool {
-    private static final Logger LOG = Logger.getLogger(SearchTool.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(SearchTool.class);
     private final HttpClient http = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(15)).build();
@@ -41,7 +42,7 @@ public final class SearchTool implements AgentTool {
         if (args.query() == null || args.query().isBlank() || args.query().length() > 500)
             return "error: query is missing or too long";
         if (key == null || key.isBlank()) return "error: search unavailable; set EXA_AI_KEY";
-        LOG.info("Exa search started; query chars=" + args.query().length() + "; limit=5");
+        LOG.info("Exa search started; query chars={}; limit=5", args.query().length());
         SearchRequest body = new SearchRequest(args.query(), "auto", 5, new Contents(true));
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.exa.ai/search"))
                 .timeout(Duration.ofSeconds(30))
@@ -51,11 +52,11 @@ public final class SearchTool implements AgentTool {
                 .build();
         long start = System.nanoTime();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-        LOG.info("Exa HTTP status=" + response.statusCode() + "; elapsed="
-                + (System.nanoTime() - start) / 1_000_000 + " ms");
+        LOG.info("Exa HTTP status={}; elapsed={} ms", response.statusCode(),
+                (System.nanoTime() - start) / 1_000_000);
         if (response.statusCode() != 200) throw new IOException("Exa returned HTTP " + response.statusCode());
         SearchResponse found = json.readValue(response.body(), SearchResponse.class);
-        LOG.info("Exa results=" + (found.results() == null ? 0 : found.results().size()));
+        LOG.info("Exa results={}", found.results() == null ? 0 : found.results().size());
         if (found.results() == null || found.results().isEmpty()) return "No results found.";
         StringBuilder out = new StringBuilder();
         for (SearchResult result : found.results()) {

@@ -6,6 +6,8 @@ import dev.learning.agent.deepseek.model.ChatRequest;
 import dev.learning.agent.deepseek.model.ToolSpec;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,11 +17,10 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /** HTTP boundary for DeepSeek's streaming Chat Completions API. */
 public final class DeepSeekClient {
-    private static final Logger LOG = Logger.getLogger(DeepSeekClient.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(DeepSeekClient.class);
     private final HttpClient http = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(15)).build();
@@ -43,8 +44,8 @@ public final class DeepSeekClient {
     public AssistantTurn stream(List<ChatMessage> messages, List<ToolSpec> tools, Consumer<String> onText)
             throws IOException, InterruptedException {
         ChatRequest body = ChatRequest.forAgent(model, messages, tools);
-        LOG.fine("DeepSeek request prepared; model=" + model + "; messages=" + messages.size()
-                + "; tools=" + tools.size() + "; stream=true; thinking=disabled");
+        LOG.debug("DeepSeek request prepared; model={}; messages={}; tools={}; stream=true; thinking=disabled",
+                model, messages.size(), tools.size());
         HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .timeout(Duration.ofSeconds(90))
                 .header("Authorization", "Bearer " + key)
@@ -54,14 +55,14 @@ public final class DeepSeekClient {
                 .build();
         long start = System.nanoTime();
         HttpResponse<java.io.InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        LOG.info("DeepSeek HTTP status=" + response.statusCode() + "; headers in "
-                + (System.nanoTime() - start) / 1_000_000 + " ms");
+        LOG.info("DeepSeek HTTP status={}; headers in {} ms", response.statusCode(),
+                (System.nanoTime() - start) / 1_000_000);
         if (response.statusCode() != 200) {
             response.body().close();
             throw new IOException("DeepSeek returned HTTP " + response.statusCode());
         }
         AssistantTurn turn = new StreamAssembler(json, onText).read(response.body());
-        LOG.info("DeepSeek stream complete in " + (System.nanoTime() - start) / 1_000_000 + " ms");
+        LOG.info("DeepSeek stream complete in {} ms", (System.nanoTime() - start) / 1_000_000);
         return turn;
     }
 }

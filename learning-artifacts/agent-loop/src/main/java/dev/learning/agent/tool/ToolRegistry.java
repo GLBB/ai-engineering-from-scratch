@@ -4,16 +4,17 @@ import dev.learning.agent.deepseek.model.ToolCall;
 import dev.learning.agent.deepseek.model.ToolSpec;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
 public final class ToolRegistry {
-    private static final Logger LOG = Logger.getLogger(ToolRegistry.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(ToolRegistry.class);
     private final Map<String, AgentTool> tools = new LinkedHashMap<>();
 
     public void register(AgentTool tool) {
@@ -26,7 +27,7 @@ public final class ToolRegistry {
     public String dispatch(ToolCall call) {
         AgentTool tool = tools.get(call.function().name());
         if (tool == null) {
-            LOG.warning("Unknown tool requested: " + call.function().name());
+            LOG.warn("Unknown tool requested: {}", call.function().name());
             return "error: unknown tool " + call.function().name();
         }
         try {

@@ -9,6 +9,8 @@ import dev.learning.agent.deepseek.model.ToolCall;
 import dev.learning.agent.deepseek.model.ToolCall.FunctionCall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -20,11 +22,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /** Reassembles SSE text and tool-call fragments into one assistant turn. */
 public final class StreamAssembler {
-    private static final Logger LOG = Logger.getLogger(StreamAssembler.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(StreamAssembler.class);
     private final ObjectMapper json;
     private final Consumer<String> onText;
     private final StringBuilder content = new StringBuilder();
@@ -58,8 +59,8 @@ public final class StreamAssembler {
         if (finishReason == null) throw new IOException("DeepSeek stream has no finish reason");
         List<ToolCall> completedCalls = new ArrayList<>();
         for (CallParts call : calls.values()) completedCalls.add(call.build());
-        LOG.fine("SSE assembled; chunks=" + chunks + "; text chars=" + content.length()
-                + "; tool calls=" + completedCalls.size() + "; finish=" + finishReason);
+        LOG.debug("SSE assembled; chunks={}; text chars={}; tool calls={}; finish={}",
+                chunks, content.length(), completedCalls.size(), finishReason);
         return new AssistantTurn(content.toString(), List.copyOf(completedCalls), finishReason);
     }
 
@@ -75,13 +76,13 @@ public final class StreamAssembler {
             if (delta == null) continue;
             if (delta.content() != null && !delta.content().isEmpty()) {
                 content.append(delta.content());
-                LOG.fine("SSE chunk " + chunks + ": text chars=" + delta.content().length());
+                LOG.debug("SSE chunk {}: text chars={}", chunks, delta.content().length());
                 onText.accept(delta.content());
             }
             if (delta.toolCalls() == null) continue;
             for (ToolCallDelta part : delta.toolCalls())
                 calls.computeIfAbsent(part.index(), ignored -> new CallParts()).append(part);
-            LOG.fine("SSE chunk " + chunks + ": tool fragments=" + delta.toolCalls().size());
+            LOG.debug("SSE chunk {}: tool fragments={}", chunks, delta.toolCalls().size());
         }
     }
 

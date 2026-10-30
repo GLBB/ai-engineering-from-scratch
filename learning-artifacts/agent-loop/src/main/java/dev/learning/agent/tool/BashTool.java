@@ -5,17 +5,18 @@ import dev.learning.agent.deepseek.model.ToolSpec.FunctionSpec;
 import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
-import java.util.logging.Logger;
 
 /** Executes only after a human approves the exact command. */
 public final class BashTool implements AgentTool {
-    private static final Logger LOG = Logger.getLogger(BashTool.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(BashTool.class);
     private static final int MAX_OUTPUT = 12_000;
     private final ObjectMapper json;
     private final Path workdir;
@@ -41,10 +42,10 @@ public final class BashTool implements AgentTool {
         if (command == null || command.isBlank() || command.length() > 2_000)
             return "error: command is missing or too long";
         if (!approve.test(command)) {
-            LOG.info("Bash command declined; chars=" + command.length());
+            LOG.info("Bash command declined; chars={}", command.length());
             return "error: user declined Bash command";
         }
-        LOG.info("Bash command approved; chars=" + command.length());
+        LOG.info("Bash command approved; chars={}", command.length());
 
         ProcessBuilder builder = new ProcessBuilder("/bin/bash", "--noprofile", "--norc", "-c", command)
                 .directory(workdir.toFile()).redirectErrorStream(true);
@@ -61,8 +62,9 @@ public final class BashTool implements AgentTool {
         if (!finished) process.destroyForcibly();
         reader.join(2_000);
         String result = "exit=" + (finished ? process.exitValue() : "timeout") + "\n" + output.text();
-        LOG.info("Bash process finished; status=" + (finished ? process.exitValue() : "timeout")
-                + "; elapsed=" + (System.nanoTime() - start) / 1_000_000 + " ms; output chars=" + result.length());
+        LOG.info("Bash process finished; status={}; elapsed={} ms; output chars={}",
+                finished ? process.exitValue() : "timeout", (System.nanoTime() - start) / 1_000_000,
+                result.length());
         if (!approveOutput.test(result)) {
             LOG.info("Bash output sharing declined");
             return "error: user declined sharing Bash output";
