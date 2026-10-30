@@ -1,4 +1,8 @@
-package dev.learning.agent;
+package dev.learning.agent.tool;
+
+import dev.learning.agent.deepseek.model.ToolSpec;
+import dev.learning.agent.deepseek.model.ToolSpec.FunctionSpec;
+import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -7,16 +11,18 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import java.util.logging.Logger;
 
 /** Executes only after a human approves the exact command. */
-final class BashTool implements AgentTool {
+public final class BashTool implements AgentTool {
+    private static final Logger LOG = Logger.getLogger(BashTool.class.getName());
     private static final int MAX_OUTPUT = 12_000;
     private final ObjectMapper json;
     private final Path workdir;
     private final Predicate<String> approve;
     private final Predicate<String> approveOutput;
 
-    BashTool(ObjectMapper json, Path workdir, Predicate<String> approve, Predicate<String> approveOutput) {
+    public BashTool(ObjectMapper json, Path workdir, Predicate<String> approve, Predicate<String> approveOutput) {
         this.json = json;
         this.workdir = workdir;
         this.approve = approve;
@@ -34,22 +40,35 @@ final class BashTool implements AgentTool {
         String command = args.command();
         if (command == null || command.isBlank() || command.length() > 2_000)
             return "error: command is missing or too long";
-        if (!approve.test(command)) return "error: user declined Bash command";
+        if (!approve.test(command)) {
+            LOG.info("Bash command declined; chars=" + command.length());
+            return "error: user declined Bash command";
+        }
+        LOG.info("Bash command approved; chars=" + command.length());
 
         ProcessBuilder builder = new ProcessBuilder("/bin/bash", "--noprofile", "--norc", "-c", command)
                 .directory(workdir.toFile()).redirectErrorStream(true);
         builder.environment().remove("DEEPSEEK_API_KEY");
+        builder.environment().remove("EXA_AI_KEY");
         builder.environment().remove("EXA_API_KEY");
         Process process = builder.start();
         CapturedOutput output = new CapturedOutput();
         Thread reader = new Thread(() -> output.drain(process), "bash-output-reader");
         reader.setDaemon(true);
         reader.start();
+        long start = System.nanoTime();
         boolean finished = process.waitFor(15, TimeUnit.SECONDS);
         if (!finished) process.destroyForcibly();
         reader.join(2_000);
         String result = "exit=" + (finished ? process.exitValue() : "timeout") + "\n" + output.text();
-        return approveOutput.test(result) ? result : "error: user declined sharing Bash output";
+        LOG.info("Bash process finished; status=" + (finished ? process.exitValue() : "timeout")
+                + "; elapsed=" + (System.nanoTime() - start) / 1_000_000 + " ms; output chars=" + result.length());
+        if (!approveOutput.test(result)) {
+            LOG.info("Bash output sharing declined");
+            return "error: user declined sharing Bash output";
+        }
+        LOG.info("Bash output sharing approved");
+        return result;
     }
 
     record BashArgs(String command) {}

@@ -2,3 +2,5 @@ target/
 *.class
 .idea/
 *.iml
+logs/*.log
+logs/*.log.lck

@@ -1,4 +1,7 @@
-package dev.learning.agent;
+package dev.learning.agent.tool;
+
+import dev.learning.agent.deepseek.model.ToolCall;
+import dev.learning.agent.deepseek.model.ToolCall.FunctionCall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -36,7 +39,7 @@ class ToolBehaviorTest {
     @Test
     void searchReportsMissingKeyWithoutNetwork() throws Exception {
         SearchTool search = new SearchTool(json, null);
-        assertEquals("error: search unavailable; set EXA_API_KEY",
+        assertEquals("error: search unavailable; set EXA_AI_KEY",
                 search.execute("{\"query\":\"agent loop\"}"));
     }
 

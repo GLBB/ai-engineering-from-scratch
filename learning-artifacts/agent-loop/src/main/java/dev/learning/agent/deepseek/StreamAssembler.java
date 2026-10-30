@@ -1,4 +1,12 @@
-package dev.learning.agent;
+package dev.learning.agent.deepseek;
+
+import dev.learning.agent.deepseek.model.AssistantTurn;
+import dev.learning.agent.deepseek.model.ChatChunk;
+import dev.learning.agent.deepseek.model.ChatChunk.ChunkChoice;
+import dev.learning.agent.deepseek.model.ChatChunk.ChunkDelta;
+import dev.learning.agent.deepseek.model.ChatChunk.ToolCallDelta;
+import dev.learning.agent.deepseek.model.ToolCall;
+import dev.learning.agent.deepseek.model.ToolCall.FunctionCall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -12,22 +20,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.logging.Logger;
 
 /** Reassembles SSE text and tool-call fragments into one assistant turn. */
-final class StreamAssembler {
+public final class StreamAssembler {
+    private static final Logger LOG = Logger.getLogger(StreamAssembler.class.getName());
     private final ObjectMapper json;
     private final Consumer<String> onText;
     private final StringBuilder content = new StringBuilder();
     private final Map<Integer, CallParts> calls = new TreeMap<>();
     private String finishReason;
     private boolean done;
+    private int chunks;
 
-    StreamAssembler(ObjectMapper json, Consumer<String> onText) {
+    public StreamAssembler(ObjectMapper json, Consumer<String> onText) {
         this.json = json;
         this.onText = onText;
     }
 
-    AssistantTurn read(InputStream input) throws IOException {
+    public AssistantTurn read(InputStream input) throws IOException {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             String line;
             StringBuilder event = new StringBuilder();
@@ -47,6 +58,8 @@ final class StreamAssembler {
         if (finishReason == null) throw new IOException("DeepSeek stream has no finish reason");
         List<ToolCall> completedCalls = new ArrayList<>();
         for (CallParts call : calls.values()) completedCalls.add(call.build());
+        LOG.fine("SSE assembled; chunks=" + chunks + "; text chars=" + content.length()
+                + "; tool calls=" + completedCalls.size() + "; finish=" + finishReason);
         return new AssistantTurn(content.toString(), List.copyOf(completedCalls), finishReason);
     }
 
@@ -54,6 +67,7 @@ final class StreamAssembler {
         if (event.isEmpty()) return;
         if ("[DONE]".contentEquals(event)) { done = true; return; }
         ChatChunk chunk = json.readValue(event.toString(), ChatChunk.class);
+        chunks++;
         if (chunk.choices() == null) return;
         for (ChunkChoice choice : chunk.choices()) {
             if (choice.finishReason() != null) finishReason = choice.finishReason();
@@ -61,11 +75,13 @@ final class StreamAssembler {
             if (delta == null) continue;
             if (delta.content() != null && !delta.content().isEmpty()) {
                 content.append(delta.content());
+                LOG.fine("SSE chunk " + chunks + ": text chars=" + delta.content().length());
                 onText.accept(delta.content());
             }
             if (delta.toolCalls() == null) continue;
             for (ToolCallDelta part : delta.toolCalls())
                 calls.computeIfAbsent(part.index(), ignored -> new CallParts()).append(part);
+            LOG.fine("SSE chunk " + chunks + ": tool fragments=" + delta.toolCalls().size());
         }
     }
 

@@ -1,14 +1,18 @@
-package dev.learning.agent;
+package dev.learning.agent.tool;
+
+import dev.learning.agent.deepseek.model.ToolSpec;
+import dev.learning.agent.deepseek.model.ToolSpec.FunctionSpec;
+import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
 
-final class CalculatorTool implements AgentTool {
+public final class CalculatorTool implements AgentTool {
     private final ObjectMapper json;
 
-    CalculatorTool(ObjectMapper json) { this.json = json; }
+    public CalculatorTool(ObjectMapper json) { this.json = json; }
 
     public ToolSpec definition() {
         return new ToolSpec("function", new FunctionSpec("calculator",

@@ -40,7 +40,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.6.4</version>
                 <configuration>
-                    <mainClass>dev.learning.agent.Main</mainClass>
+                    <mainClass>dev.learning.agent.app.Main</mainClass>
                 </configuration>
             </plugin>
         </plugins>

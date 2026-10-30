@@ -1,4 +1,7 @@
-package dev.learning.agent;
+package dev.learning.agent.tool;
+
+import dev.learning.agent.deepseek.model.ToolCall;
+import dev.learning.agent.deepseek.model.ToolSpec;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 
@@ -7,20 +10,25 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
-final class ToolRegistry {
+public final class ToolRegistry {
+    private static final Logger LOG = Logger.getLogger(ToolRegistry.class.getName());
     private final Map<String, AgentTool> tools = new LinkedHashMap<>();
 
-    void register(AgentTool tool) {
+    public void register(AgentTool tool) {
         String name = tool.definition().function().name();
         if (tools.putIfAbsent(name, tool) != null) throw new IllegalArgumentException("duplicate tool: " + name);
     }
 
-    List<ToolSpec> definitions() { return tools.values().stream().map(AgentTool::definition).toList(); }
+    public List<ToolSpec> definitions() { return tools.values().stream().map(AgentTool::definition).toList(); }
 
-    String dispatch(ToolCall call) {
+    public String dispatch(ToolCall call) {
         AgentTool tool = tools.get(call.function().name());
-        if (tool == null) return "error: unknown tool " + call.function().name();
+        if (tool == null) {
+            LOG.warning("Unknown tool requested: " + call.function().name());
+            return "error: unknown tool " + call.function().name();
+        }
         try {
             return tool.execute(call.function().arguments());
         } catch (JsonProcessingException e) {

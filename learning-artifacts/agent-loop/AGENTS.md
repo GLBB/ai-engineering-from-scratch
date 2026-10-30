@@ -1,12 +1,20 @@
-# Agent Loop Demo Rules
+# 项目协作约定
 
-This directory is a learner-owned Java Maven demo, not a curriculum lesson.
+本目录是学习用的 Java Agent 项目。修改代码时，以可阅读、可运行、可验证为目标。
 
-- Keep chat messages, requests, responses, tool definitions, and tool arguments as named Java types. Do not use `List<Map<String, Object>>` or untyped JSON objects as application state.
-- Use Jackson only at HTTP/JSON boundaries. Keep the agent loop independent of HTTP details.
-- Keep every tool behind one interface with a typed argument record and an explicit definition.
-- Never hard-code or log API keys. Read `DEEPSEEK_API_KEY` and `EXA_API_KEY` from the environment.
-- Treat model tool calls and search results as untrusted data. Ask the user before running every Bash command and again before sending its output to DeepSeek. Cap command runtime and captured output.
-- Bound model turns and surface API, stream, and tool errors clearly. Do not claim success after an incomplete stream.
-- Build with `mvn compile`. When credentials are available, smoke test a real DeepSeek tool call. Search remains unverified until `EXA_API_KEY` is configured.
-- Keep code compatible with Java 17 even if the local JDK is newer.
+## 结构
+
+- 按职责分包：入口负责交互，核心负责循环，客户端负责外部协议，模型类负责数据契约，工具负责具体能力。
+- 外部请求、响应及工具参数使用明确的 Java 类型；不要把通用 JSON 对象当作应用状态传递。
+- 新增依赖前先确认标准库或现有依赖是否已能解决问题，并在 `pom.xml` 中固定版本。
+
+## 边界
+
+- API key 只从环境变量读取，不写入源码、日志、测试数据或 Git。
+- 模型和外部内容都可能出错；验证参数、限制运行时间与输出量，把可恢复的工具失败作为观察结果返回。
+- 执行本地命令和向外部模型发送命令输出都需要用户明确确认。
+
+## 交付
+
+- 更新行为时同步更新 README 和必要的测试；运行 `mvn test`。
+- 真实接口的结果与未验证部分分开报告。日志应能帮助追踪轮次、耗时和失败原因，同时避免记录密钥及不必要的敏感内容。

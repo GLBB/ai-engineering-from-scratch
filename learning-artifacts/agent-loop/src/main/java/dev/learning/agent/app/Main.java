@@ -1,4 +1,12 @@
-package dev.learning.agent;
+package dev.learning.agent.app;
+
+import dev.learning.agent.core.AgentLoop;
+import dev.learning.agent.deepseek.DeepSeekClient;
+import dev.learning.agent.logging.LogSetup;
+import dev.learning.agent.tool.BashTool;
+import dev.learning.agent.tool.CalculatorTool;
+import dev.learning.agent.tool.SearchTool;
+import dev.learning.agent.tool.ToolRegistry;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,14 +15,20 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Logger;
 
 /** Interactive CLI. Answers stream as DeepSeek emits text deltas. */
 public final class Main {
+    private static final Logger LOG = Logger.getLogger(Main.class.getName());
     private Main() {}
 
     public static void main(String[] args) throws IOException {
+        Path projectRoot = projectRoot();
+        Path logDirectory = LogSetup.configure(projectRoot);
+        LOG.info("Agent starting; logs directory=" + logDirectory);
         String key = System.getenv("DEEPSEEK_API_KEY");
         if (key == null || key.isBlank()) throw new IllegalStateException("DEEPSEEK_API_KEY is required");
         ObjectMapper json = new ObjectMapper()
@@ -22,10 +36,14 @@ public final class Main {
         BufferedReader terminal = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         ToolRegistry tools = new ToolRegistry();
         tools.register(new CalculatorTool(json));
-        tools.register(new BashTool(json, Path.of("").toAbsolutePath(),
+        tools.register(new BashTool(json, projectRoot,
                 command -> approve(terminal, "Run Bash command", command),
                 output -> approve(terminal, "Send Bash output to DeepSeek", output)));
-        tools.register(new SearchTool(json, System.getenv("EXA_API_KEY")));
+        String exaKey = System.getenv("EXA_AI_KEY");
+        if (exaKey == null || exaKey.isBlank()) exaKey = System.getenv("EXA_API_KEY");
+        tools.register(new SearchTool(json, exaKey));
+        LOG.info("Tools ready: calculator, bash, search; Exa credential="
+                + (exaKey == null || exaKey.isBlank() ? "missing" : "configured"));
         DeepSeekClient client = new DeepSeekClient(json, key,
                 System.getenv().getOrDefault("DEEPSEEK_MODEL", "deepseek-flash"),
                 System.getenv().getOrDefault("DEEPSEEK_BASE_URL", "https://api.deepseek.com"));
@@ -45,6 +63,7 @@ public final class Main {
             if (prompt.isBlank()) continue;
             textStarted.set(false);
             try {
+                LOG.info("User turn accepted; characters=" + prompt.length());
                 agent.run(prompt);
                 System.out.println();
             } catch (InterruptedException e) {
@@ -52,9 +71,18 @@ public final class Main {
                 System.err.println("Agent interrupted.");
                 break;
             } catch (Exception e) {
+                LOG.warning("Agent turn failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 System.err.println("\nAgent error: " + e.getMessage());
             }
         }
+        LOG.info("Agent stopped");
+    }
+
+    private static Path projectRoot() {
+        Path current = Path.of("").toAbsolutePath().normalize();
+        Path module = current.resolve("learning-artifacts/agent-loop");
+        if (Files.isRegularFile(module.resolve("pom.xml"))) return module;
+        return current;
     }
 
     private static boolean approve(BufferedReader terminal, String action, String content) {
