@@ -1,0 +1,67 @@
+package dev.learning.agent;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** Interactive CLI. Answers stream as DeepSeek emits text deltas. */
+public final class Main {
+    private Main() {}
+
+    public static void main(String[] args) throws IOException {
+        String key = System.getenv("DEEPSEEK_API_KEY");
+        if (key == null || key.isBlank()) throw new IllegalStateException("DEEPSEEK_API_KEY is required");
+        ObjectMapper json = new ObjectMapper()
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        BufferedReader terminal = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        ToolRegistry tools = new ToolRegistry();
+        tools.register(new CalculatorTool(json));
+        tools.register(new BashTool(json, Path.of("").toAbsolutePath(),
+                command -> approve(terminal, "Run Bash command", command),
+                output -> approve(terminal, "Send Bash output to DeepSeek", output)));
+        tools.register(new SearchTool(json, System.getenv("EXA_API_KEY")));
+        DeepSeekClient client = new DeepSeekClient(json, key,
+                System.getenv().getOrDefault("DEEPSEEK_MODEL", "deepseek-flash"),
+                System.getenv().getOrDefault("DEEPSEEK_BASE_URL", "https://api.deepseek.com"));
+        AtomicBoolean textStarted = new AtomicBoolean();
+        AgentLoop agent = new AgentLoop(client, tools, 8, delta -> {
+            if (textStarted.compareAndSet(false, true)) System.out.print("assistant> ");
+            System.out.print(delta);
+            System.out.flush();
+        }, event -> System.err.println("[" + event + "]"));
+
+        System.out.println("Agent ready. Enter a prompt, or /exit to quit.");
+        while (true) {
+            System.out.print("you> ");
+            System.out.flush();
+            String prompt = terminal.readLine();
+            if (prompt == null || prompt.equalsIgnoreCase("/exit")) break;
+            if (prompt.isBlank()) continue;
+            textStarted.set(false);
+            try {
+                agent.run(prompt);
+                System.out.println();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("Agent interrupted.");
+                break;
+            } catch (Exception e) {
+                System.err.println("\nAgent error: " + e.getMessage());
+            }
+        }
+    }
+
+    private static boolean approve(BufferedReader terminal, String action, String content) {
+        System.err.println("\n" + action + ":\n" + content);
+        System.err.print("Approve? [y/N] ");
+        System.err.flush();
+        try { return "y".equalsIgnoreCase(terminal.readLine()); }
+        catch (IOException e) { return false; }
+    }
+}
