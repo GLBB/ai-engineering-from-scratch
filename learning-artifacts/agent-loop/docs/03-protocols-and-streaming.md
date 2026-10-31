@@ -8,7 +8,7 @@
 
 | 页面中的选项 | 客户端 | DeepSeek 路径 | 适配重点 |
 | --- | --- | --- | --- |
-| Chat Completions | [DeepSeekClient](../src/main/java/dev/learning/agent/deepseek/DeepSeekClient.java) | `/chat/completions` | `messages`、工具调用片段和 `reasoning_content`。 |
+| Chat Completions | [ChatCompletionsClient](../src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) | `/chat/completions` | `messages`、工具调用片段和 `reasoning_content`。 |
 | Responses | [ResponsesClient](../src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | `/responses` | `input` 中的消息、`function_call`、`function_call_output` 和语义化流事件。 |
 | Anthropic Messages | [AnthropicClient](../src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | `/anthropic/v1/messages` | 有顺序的内容块，`tool_use`、`tool_result` 和 thinking 内容。 |
 

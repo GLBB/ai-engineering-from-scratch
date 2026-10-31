@@ -69,7 +69,7 @@ flowchart TD
 | [`core/TraceEvent.java`](src/main/java/dev/learning/agent/core/TraceEvent.java) | 定义模型、工具和助手步骤的轨迹事件。 |
 | [`static/`](src/main/resources/static/) | 浏览器页面、样式和交互脚本。 |
 | [`core/AgentLoop.java`](src/main/java/dev/learning/agent/core/AgentLoop.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
-| [`deepseek/DeepSeekClient.java`](src/main/java/dev/learning/agent/deepseek/DeepSeekClient.java) | 发送 DeepSeek HTTP 请求。 |
+| [`deepseek/ChatCompletionsClient.java`](src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) | 处理 Chat Completions 请求和流式响应。 |
 | [`deepseek/ResponsesClient.java`](src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | 处理 Responses 请求、历史消息和流式事件。 |
 | [`deepseek/AnthropicClient.java`](src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | 处理 Anthropic 内容块、工具结果和流式事件。 |
 | [`deepseek/StreamAssembler.java`](src/main/java/dev/learning/agent/deepseek/StreamAssembler.java) | 读取 SSE 事件，输出文本片段，按索引合并工具调用及参数片段。 |

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.app.settings.SettingsStore;
 import dev.learning.agent.core.AgentLoop;
-import dev.learning.agent.deepseek.DeepSeekClient;
+import dev.learning.agent.deepseek.ChatCompletionsClient;
 import dev.learning.agent.deepseek.ResponsesClient;
 import dev.learning.agent.deepseek.AnthropicClient;
 import dev.learning.agent.core.ChatModel;
@@ -36,7 +36,7 @@ final class AgentSessions {
         if (key == null || key.isBlank()) throw new IllegalStateException("DEEPSEEK_API_KEY is required");
         String baseUrl = System.getenv().getOrDefault("DEEPSEEK_BASE_URL", "https://api.deepseek.com");
         client = switch (settings.activeProtocol()) {
-            case CHAT_COMPLETIONS -> new DeepSeekClient(json, key, baseUrl);
+            case CHAT_COMPLETIONS -> new ChatCompletionsClient(json, key, baseUrl);
             case RESPONSES -> new ResponsesClient(json, key, baseUrl);
             case ANTHROPIC -> new AnthropicClient(json, key, baseUrl);
         };

@@ -21,8 +21,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /** HTTP boundary for DeepSeek's streaming Chat Completions API. */
-public final class DeepSeekClient implements ChatModel {
-    private static final Logger LOG = LoggerFactory.getLogger(DeepSeekClient.class);
+public final class ChatCompletionsClient implements ChatModel {
+    private static final Logger LOG = LoggerFactory.getLogger(ChatCompletionsClient.class);
     private final HttpClient http = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(15)).build();
@@ -30,7 +30,7 @@ public final class DeepSeekClient implements ChatModel {
     private final String key;
     private final URI endpoint;
 
-    public DeepSeekClient(ObjectMapper json, String key, String baseUrl) {
+    public ChatCompletionsClient(ObjectMapper json, String key, String baseUrl) {
         if (key == null || key.isBlank()) throw new IllegalArgumentException("DEEPSEEK_API_KEY is required");
         if (baseUrl == null || baseUrl.isBlank()) throw new IllegalArgumentException("base URL is required");
         URI base = URI.create(baseUrl);
