@@ -8,6 +8,7 @@
 2. [一次对话如何运行](02-agent-loop.md)：沿着一条需要计算的消息，理解会话、模型、工具和循环。
 3. [协议、流式输出和轨迹](03-protocols-and-streaming.md)：理解三种 DeepSeek 接口如何接入，以及页面怎样收到实时结果。
 4. [动手运行和调试](04-run-and-debug.md)：启动项目、查看轨迹、设置断点和运行测试。
+5. [工具调用上限、终止条件和对话记录](05-tool-calls-and-transcripts.md)：运行离线实验，对比四种 API 的调用与结果格式。
 
 已经熟悉 Agent 基本概念的话，可以直接从 [AgentLoop.java](../src/main/java/dev/learning/agent/core/AgentLoop.java) 开始读，再根据调用关系返回文档。
 

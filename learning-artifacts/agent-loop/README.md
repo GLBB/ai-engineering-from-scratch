@@ -6,6 +6,8 @@
 
 想通过代码理解项目，可以从 [docs/Agent Loop 学习指南](docs/README.md) 开始，按顺序了解项目结构、一次对话的执行过程、协议适配和调试方法。
 
+[工具调用实验](docs/05-tool-calls-and-transcripts.md) 对比少回一个结果、执行上限和倒序返回三个场景，并梳理 Chat Completions、Responses、Anthropic Messages 与 Bedrock Converse 的对话记录。实验无需 API key，在本目录运行 `mvn -Dtest=ToolTranscriptExperimentTest,AgentLoopTest test`，可在 `target/tool-transcript-experiment/` 查看生成的请求 JSON。
+
 ## 快速运行
 
 需要 Java 17 或更高版本、Maven，以及可用的 DeepSeek API key。在本项目目录运行：

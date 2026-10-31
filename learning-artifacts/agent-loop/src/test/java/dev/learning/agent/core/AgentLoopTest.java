@@ -19,6 +19,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AgentLoopTest {
     @Test
+    void noToolCallsEndsTheLoopEvenWhenTheTaskWasNotPerformed() throws Exception {
+        ToolRegistry tools = new ToolRegistry();
+        tools.register(new CalculatorTool(new ObjectMapper()));
+        List<List<ChatMessage>> requests = new ArrayList<>();
+        List<String> toolNotifications = new ArrayList<>();
+        List<String> text = new ArrayList<>();
+        ChatModel model = (messages, definitions, onText, settings) -> {
+            requests.add(messages);
+            onText.accept("I will calculate that next.");
+            return new AssistantTurn("I will calculate that next.", List.of(), "stop");
+        };
+        AgentLoop loop = new AgentLoop(model, tools, 3, text::add, toolNotifications::add);
+
+        loop.run("Use calculator to calculate 1+2.", ModelSettings.defaults());
+
+        assertEquals(1, requests.size());
+        assertTrue(toolNotifications.isEmpty());
+        assertEquals(List.of("I will calculate that next."), text);
+    }
+
+    @Test
     void finalAnswerIsIncludedInNextUserRequest() throws Exception {
         List<List<ChatMessage>> requests = new ArrayList<>();
         ChatModel model = (messages, definitions, onText, settings) -> {

@@ -1,6 +1,6 @@
 # 4. 动手运行和调试
 
-[返回目录](README.md) · 上一篇：[协议、流式输出和轨迹](03-protocols-and-streaming.md)
+[返回目录](README.md) · 上一篇：[协议、流式输出和轨迹](03-protocols-and-streaming.md) · 下一篇：[工具调用上限、终止条件和对话记录](05-tool-calls-and-transcripts.md)
 
 ## 启动前准备
 
