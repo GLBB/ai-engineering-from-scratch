@@ -29,6 +29,7 @@ public final class StreamAssembler {
     private final ObjectMapper json;
     private final Consumer<String> onText;
     private final StringBuilder content = new StringBuilder();
+    private final StringBuilder reasoningContent = new StringBuilder();
     private final Map<Integer, CallParts> calls = new TreeMap<>();
     private String finishReason;
     private boolean done;
@@ -59,9 +60,10 @@ public final class StreamAssembler {
         if (finishReason == null) throw new IOException("DeepSeek stream has no finish reason");
         List<ToolCall> completedCalls = new ArrayList<>();
         for (CallParts call : calls.values()) completedCalls.add(call.build());
-        LOG.debug("SSE assembled; chunks={}; text chars={}; tool calls={}; finish={}",
-                chunks, content.length(), completedCalls.size(), finishReason);
-        return new AssistantTurn(content.toString(), List.copyOf(completedCalls), finishReason);
+        LOG.debug("SSE assembled; chunks={}; text chars={}; reasoning chars={}; tool calls={}; finish={}",
+                chunks, content.length(), reasoningContent.length(), completedCalls.size(), finishReason);
+        return new AssistantTurn(content.toString(), List.copyOf(completedCalls), finishReason,
+                reasoningContent.isEmpty() ? null : reasoningContent.toString());
     }
 
     private void dispatch(StringBuilder event) throws IOException {
@@ -78,6 +80,10 @@ public final class StreamAssembler {
                 content.append(delta.content());
                 LOG.debug("SSE chunk {}: text chars={}", chunks, delta.content().length());
                 onText.accept(delta.content());
+            }
+            if (delta.reasoningContent() != null && !delta.reasoningContent().isEmpty()) {
+                reasoningContent.append(delta.reasoningContent());
+                LOG.debug("SSE chunk {}: reasoning chars={}", chunks, delta.reasoningContent().length());
             }
             if (delta.toolCalls() == null) continue;
             for (ToolCallDelta part : delta.toolCalls())

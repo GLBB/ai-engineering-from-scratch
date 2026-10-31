@@ -56,6 +56,7 @@ scripts/                      # automation
 6. **Dependency allowlist** (see `Dependencies` below). Stdlib-first.
 7. **Never commit generated files**: `catalog.json` is gitignored, `site/data.js` is rebuilt by CI, `package-lock.json` is never tracked.
 8. **Answer every review bot thread.** CodeRabbit and Devin review each PR. Fix the finding or reply with the reason it does not apply, then resolve the thread.
+9. **Write code that is easy to read at a glance.** Use clear names, short focused functions, and straightforward control flow. Make the intent visible without requiring readers to mentally unpack dense expressions or clever abstractions.
 
 ---
 

@@ -11,7 +11,9 @@ public record ChatChunk(List<ChunkChoice> choices) {
     public record ChunkChoice(ChunkDelta delta, @JsonProperty("finish_reason") String finishReason) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ChunkDelta(String content, @JsonProperty("tool_calls") List<ToolCallDelta> toolCalls) {}
+    public record ChunkDelta(String content,
+                             @JsonProperty("reasoning_content") String reasoningContent,
+                             @JsonProperty("tool_calls") List<ToolCallDelta> toolCalls) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ToolCallDelta(int index, String id, String type, FunctionDelta function) {}

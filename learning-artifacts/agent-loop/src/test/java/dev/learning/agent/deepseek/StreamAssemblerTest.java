@@ -48,4 +48,27 @@ class StreamAssemblerTest {
         assertThrows(IOException.class, () -> new StreamAssembler(new ObjectMapper(), ignored -> {})
                 .read(new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8))));
     }
+
+    @Test
+    void collectsReasoningContentSeparatelyFromVisibleAnswer() throws Exception {
+        String sse = """
+                data: {"choices":[{"delta":{"reasoning_content":"First "},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"reasoning_content":"think."},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{"content":"Answer"},"finish_reason":null}]}
+
+                data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """;
+        List<String> visible = new ArrayList<>();
+        AssistantTurn turn = new StreamAssembler(new ObjectMapper(), visible::add)
+                .read(new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals("First think.", turn.reasoningContent());
+        assertEquals("Answer", turn.content());
+        assertEquals(List.of("Answer"), visible);
+    }
 }

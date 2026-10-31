@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * DeepSeek Chat Completions 请求体。字段以官方文档为准；未设置的可选字段不会发出。
- * 本 demo 通过 {@link #forAgent} 只启用流式输出、非思考模式和工具调用。
+ * 本 demo 通过 {@link #forAgent} 启用流式输出、可选思考模式和工具调用。
  * 文档：https://api-docs.deepseek.com/api/create-chat-completion/
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -54,9 +54,11 @@ public final class ChatRequest {
         this.messages = List.copyOf(messages);
     }
 
-    public static ChatRequest forAgent(String model, List<ChatMessage> messages, List<ToolSpec> tools) {
-        ChatRequest request = new ChatRequest(model, messages);
-        request.thinking = new Thinking("disabled");
+    public static ChatRequest forAgent(ModelSettings settings, List<ChatMessage> messages,
+                                       List<ToolSpec> tools) {
+        ChatRequest request = new ChatRequest(settings.model(), messages);
+        request.thinking = new Thinking(settings.thinking() ? "enabled" : "disabled");
+        request.reasoningEffort = settings.apiReasoningEffort();
         request.stream = true;
         request.tools = List.copyOf(tools);
         request.toolChoice = "auto";

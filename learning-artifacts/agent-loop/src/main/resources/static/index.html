@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Agent Loop</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/trace.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">A</span><span>Agent Loop</span></div>
+      <div class="topbar-right"><span class="local-tag">本地运行</span><span id="connection-status">连接中…</span></div>
+    </header>
+    <nav class="view-tabs" aria-label="查看方式">
+      <button type="button" data-view="conversation" aria-selected="true">对话</button>
+      <button type="button" data-view="trace" aria-selected="false">轨迹</button>
+    </nav>
+    <main id="conversation" class="conversation" aria-live="polite">
+      <section id="welcome" class="welcome">
+        <div class="welcome-icon">✦</div>
+        <h1>有什么可以帮你？</h1>
+        <p>输入问题，查看 Agent 的回答和工具执行过程。</p>
+      </section>
+    </main>
+    <section id="trace-view" class="trace-view" aria-label="Agent 轨迹" hidden>
+      <div class="trace-toolbar">
+        <div class="trace-stats">
+          <span id="trace-duration">时长 0 ms</span>
+          <span id="trace-rounds">模型轮次 0</span>
+          <span id="trace-tools">工具调用 0</span>
+        </div>
+        <label class="sr-only" for="trace-search">搜索轨迹</label>
+        <input id="trace-search" type="search" placeholder="搜索轨迹…">
+      </div>
+      <div id="trace-timelines" class="trace-timelines"></div>
+      <div id="trace-events" class="trace-events">
+        <p class="trace-empty">发送消息后，这里会显示实际发生的模型请求和工具调用。</p>
+      </div>
+    </section>
+    <div class="composer-wrap">
+      <form id="chat-form" class="composer">
+        <label class="sr-only" for="prompt">输入问题</label>
+        <textarea id="prompt" rows="1" maxlength="10000" placeholder="输入消息…  Enter 发送，Shift + Enter 换行" disabled></textarea>
+        <div class="composer-footer">
+          <div class="model-controls">
+            <label class="model-field" for="model-select">
+              <span>模型</span>
+              <select id="model-select">
+                <option value="deepseek-flash">DeepSeek V4.1 Flash</option>
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+              </select>
+            </label>
+            <label class="model-field" for="effort-select">
+              <span>推理等级</span>
+              <select id="effort-select">
+                <option value="off" selected>Off</option>
+                <option value="low">Low</option>
+                <option value="high">High</option>
+                <option value="max">Max</option>
+              </select>
+            </label>
+          </div>
+          <button id="send-button" type="submit" disabled aria-label="发送">↑</button>
+        </div>
+      </form>
+      <p class="hint">Bash 命令及其输出需要你在页面中分别确认。会话仅保存在当前进程内。</p>
+    </div>
+  </div>
+  <button id="settings-open" class="settings-open" type="button" aria-label="打开设置">⚙ 设置</button>
+  <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <div class="settings-heading">
+        <h2 id="settings-title">设置</h2>
+        <button id="settings-close" type="button" aria-label="关闭设置">×</button>
+      </div>
+      <label for="protocol-select">API 对接方式</label>
+      <select id="protocol-select" name="protocol">
+        <option value="CHAT_COMPLETIONS">Chat Completions</option>
+        <option value="RESPONSES">Responses</option>
+        <option value="ANTHROPIC">Anthropic Messages</option>
+      </select>
+      <p id="protocol-status" class="protocol-status" aria-live="polite"></p>
+      <div class="settings-actions"><button id="settings-save" type="submit">保存设置</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

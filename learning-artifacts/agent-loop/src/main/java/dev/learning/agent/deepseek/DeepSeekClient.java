@@ -3,7 +3,9 @@ package dev.learning.agent.deepseek;
 import dev.learning.agent.deepseek.model.AssistantTurn;
 import dev.learning.agent.deepseek.model.ChatMessage;
 import dev.learning.agent.deepseek.model.ChatRequest;
+import dev.learning.agent.deepseek.model.ModelSettings;
 import dev.learning.agent.deepseek.model.ToolSpec;
+import dev.learning.agent.core.ChatModel;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -19,33 +21,37 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /** HTTP boundary for DeepSeek's streaming Chat Completions API. */
-public final class DeepSeekClient {
+public final class DeepSeekClient implements ChatModel {
     private static final Logger LOG = LoggerFactory.getLogger(DeepSeekClient.class);
     private final HttpClient http = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(15)).build();
     private final ObjectMapper json;
     private final String key;
-    private final String model;
     private final URI endpoint;
 
-    public DeepSeekClient(ObjectMapper json, String key, String model, String baseUrl) {
+    public DeepSeekClient(ObjectMapper json, String key, String baseUrl) {
         if (key == null || key.isBlank()) throw new IllegalArgumentException("DEEPSEEK_API_KEY is required");
-        if (model == null || model.isBlank()) throw new IllegalArgumentException("model is required");
         if (baseUrl == null || baseUrl.isBlank()) throw new IllegalArgumentException("base URL is required");
         URI base = URI.create(baseUrl);
         if (!"https".equals(base.getScheme())) throw new IllegalArgumentException("DeepSeek base URL must use HTTPS");
         this.json = json;
         this.key = key;
-        this.model = model;
         this.endpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/chat/completions");
     }
 
-    public AssistantTurn stream(List<ChatMessage> messages, List<ToolSpec> tools, Consumer<String> onText)
+    @Override
+    public AssistantTurn stream(List<ChatMessage> messages, List<ToolSpec> tools,
+                                Consumer<String> onText, ModelSettings settings)
             throws IOException, InterruptedException {
-        ChatRequest body = ChatRequest.forAgent(model, messages, tools);
-        LOG.debug("DeepSeek request prepared; model={}; messages={}; tools={}; stream=true; thinking=disabled",
-                model, messages.size(), tools.size());
+        ChatRequest body = ChatRequest.forAgent(settings, messages, tools);
+        LOG.debug("DeepSeek request prepared; model={}; messages={}; tools={}; thinking={}; effort={}",
+                settings.model(), messages.size(), tools.size(), settings.thinking(), settings.reasoningLevel());
+        return send(body, onText);
+    }
+
+    private AssistantTurn send(ChatRequest body, Consumer<String> onText)
+            throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(endpoint)
                 .timeout(Duration.ofSeconds(90))
                 .header("Authorization", "Bearer " + key)
