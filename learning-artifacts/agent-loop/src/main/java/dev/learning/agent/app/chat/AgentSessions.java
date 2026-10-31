@@ -1,7 +1,8 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.chat;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.learning.agent.app.settings.SettingsStore;
 import dev.learning.agent.core.AgentLoop;
 import dev.learning.agent.deepseek.DeepSeekClient;
 import dev.learning.agent.deepseek.ResponsesClient;

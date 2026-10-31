@@ -1,4 +1,4 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.settings;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

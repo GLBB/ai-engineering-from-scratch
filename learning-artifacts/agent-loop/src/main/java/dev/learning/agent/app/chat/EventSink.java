@@ -1,4 +1,4 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.chat;
 
 /** Sends one structured event to the active browser response. */
 @FunctionalInterface

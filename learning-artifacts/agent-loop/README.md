@@ -4,6 +4,8 @@
 
 程序以 Spring Boot 提供本地浏览器聊天界面。回答会实时显示，工具包括四则运算、Bash 和 Exa 搜索。默认使用 `deepseek-flash`，思考模式关闭；可在输入框中切换模型和推理等级。每个浏览器页面拥有独立的内存会话；刷新页面会开始新会话。
 
+想通过代码理解项目，可以从 [docs/Agent Loop 学习指南](docs/README.md) 开始，按顺序了解项目结构、一次对话的执行过程、协议适配和调试方法。
+
 ## 快速运行
 
 需要 Java 17 或更高版本、Maven，以及可用的 DeepSeek API key。在本项目目录运行：
@@ -61,9 +63,9 @@ flowchart TD
 | 位置 | 职责 |
 | --- | --- |
 | [`app/WebMain.java`](src/main/java/dev/learning/agent/app/WebMain.java) | 启动 Spring Boot 本地服务。 |
-| [`app/ChatController.java`](src/main/java/dev/learning/agent/app/ChatController.java) | 创建页面会话，流式发送事件，接收 Bash 确认。 |
-| [`app/AgentSessions.java`](src/main/java/dev/learning/agent/app/AgentSessions.java) | 为每个页面保存独立的 Agent 循环和确认状态。 |
-| [`app/SettingsStore.java`](src/main/java/dev/learning/agent/app/SettingsStore.java) | 读取、保存协议设置；保存后重启生效。 |
+| [`app/chat/`](src/main/java/dev/learning/agent/app/chat/) | 创建页面会话、流式发送事件和处理 Bash 确认。 |
+| [`app/settings/`](src/main/java/dev/learning/agent/app/settings/) | 读取和保存协议设置；保存后重启生效。 |
+| [`app/LocalRequest.java`](src/main/java/dev/learning/agent/app/LocalRequest.java) | 检查本地请求的主机和来源。 |
 | [`core/TraceEvent.java`](src/main/java/dev/learning/agent/core/TraceEvent.java) | 定义模型、工具和助手步骤的轨迹事件。 |
 | [`static/`](src/main/resources/static/) | 浏览器页面、样式和交互脚本。 |
 | [`core/AgentLoop.java`](src/main/java/dev/learning/agent/core/AgentLoop.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
@@ -80,6 +82,8 @@ flowchart TD
 ## 设计思路
 
 Agent 循环可以理解为：**把当前消息交给模型 → 按模型请求执行工具 → 把结果作为新消息交还模型 → 重复，直到得到最终回答**。
+
+阅读 `AgentLoop` 时，从 `run` 看整体流程：请求模型、校验结束原因、保存回复，再决定结束或执行工具。`startRequest` 初始化本次请求，`requestModel` 负责模型调用及其开始、完成和失败轨迹，`traceAnswer` 记录思考和回答，`validateFinishReason` 校验结束原因，`executeTool` 执行单个工具并记录轨迹与结果。
 
 1. **模型决定，程序执行。** 模型返回工具名称和 JSON 参数；`ToolRegistry` 按名称查找 `AgentTool`，由 Java 实际执行。工具定义包含名称、描述和参数 Schema，随请求一起发送给模型。
 2. **消息历史连接各轮。** `system` 提供行为指引，`user` 保存问题，`assistant` 保存模型回复或工具调用，`tool` 保存执行结果。工具结果通过 `tool_call_id` 对应具体调用。Think 开启且请求携带工具时，模型返回的 `reasoning_content` 也保存在对应的 assistant 消息中，并随下次请求发回 DeepSeek。

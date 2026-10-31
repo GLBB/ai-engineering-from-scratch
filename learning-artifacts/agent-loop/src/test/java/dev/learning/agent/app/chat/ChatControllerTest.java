@@ -1,4 +1,4 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.core.TraceEvent;

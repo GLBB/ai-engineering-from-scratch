@@ -49,71 +49,94 @@ public final class AgentLoop {
     public void run(String prompt, ModelSettings settings) throws IOException, InterruptedException {
         if (prompt == null || prompt.isBlank()) throw new IllegalArgumentException("prompt is required");
         if (settings == null) throw new IllegalArgumentException("model settings are required");
+        String requestId = startRequest(prompt, settings);
+        int toolIndex = 0;
+        for (int turn = 0; turn < maxTurns; turn++) {
+            int currentTurn = turn + 1;
+            AssistantTurn answer = requestModel(requestId, currentTurn, settings);
+            validateFinishReason(answer);
+            messages.add(ChatMessage.assistant(answer));
+            if (answer.calls().isEmpty()) {
+                LOG.info("User turn complete");
+                return;
+            }
+            for (ToolCall call : answer.calls()) {
+                String toolId = "tool-" + requestId + "-" + ++toolIndex;
+                executeTool(call, toolId, currentTurn);
+            }
+        }
+        throw new IOException("agent stopped after " + maxTurns + " model turns");
+    }
+
+    private String startRequest(String prompt, ModelSettings settings) {
         String requestId = UUID.randomUUID().toString();
         messages.add(ChatMessage.user(prompt));
         onTrace.accept(TraceEvent.user("user-" + requestId, prompt, System.currentTimeMillis()));
         onTrace.accept(TraceEvent.settings("settings-" + requestId, settings, client.protocol(),
                 System.currentTimeMillis()));
-        int toolIndex = 0;
-        for (int turn = 0; turn < maxTurns; turn++) {
-            int currentTurn = turn + 1;
-            LOG.info("Model turn {}/{}; history messages={}", currentTurn, maxTurns, messages.size());
-            String modelId = "model-" + requestId + "-" + currentTurn;
-            int messageCount = messages.size();
-            long modelStartedAt = System.currentTimeMillis();
-            long modelStartNanos = System.nanoTime();
-            onTrace.accept(TraceEvent.modelStarted(modelId, currentTurn, modelStartedAt, messageCount));
-            AssistantTurn answer;
-            try {
-                answer = client.stream(List.copyOf(messages), tools.definitions(), onText, settings);
-            } catch (IOException | InterruptedException | RuntimeException e) {
-                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                onTrace.accept(TraceEvent.modelFailed(modelId, currentTurn, modelStartedAt,
-                        elapsedMs(modelStartNanos), messageCount, reason));
-                throw e;
-            }
-            onTrace.accept(TraceEvent.modelFinished(modelId, currentTurn, modelStartedAt,
-                    elapsedMs(modelStartNanos), messageCount, answer.finishReason(),
-                    answer.calls().size(), answer.content()));
-            LOG.info("Model turn {} finished; reason={}; tool calls={}; text chars={}",
-                    currentTurn, answer.finishReason(), answer.calls().size(), answer.content().length());
-            if (answer.reasoningContent() != null && !answer.reasoningContent().isBlank()) {
-                onTrace.accept(TraceEvent.reasoning("reasoning-" + modelId, currentTurn,
-                        System.currentTimeMillis(), answer.reasoningContent()));
-            }
-            if (!answer.content().isBlank()) {
-                onTrace.accept(TraceEvent.assistant("assistant-" + modelId, currentTurn,
-                        System.currentTimeMillis(), answer.content()));
-            }
-            if (!answer.calls().isEmpty()) {
-                if (!"tool_calls".equals(answer.finishReason()))
-                    throw new IOException("DeepSeek returned tools with unexpected finish reason: " + answer.finishReason());
-                messages.add(ChatMessage.assistant(answer));
-                for (ToolCall call : answer.calls()) {
-                    String toolId = "tool-" + requestId + "-" + ++toolIndex;
-                    String name = call.function().name();
-                    String arguments = call.function().arguments();
-                    long toolStartedAt = System.currentTimeMillis();
-                    long toolStartNanos = System.nanoTime();
-                    onTrace.accept(TraceEvent.toolStarted(toolId, currentTurn, toolStartedAt,
-                            name, arguments));
-                    LOG.info("Dispatching tool={}; call id={}", call.function().name(), call.id());
-                    onTool.accept("tool: " + call.function().name());
-                    String result = tools.dispatch(call);
-                    onTrace.accept(TraceEvent.toolFinished(toolId, currentTurn, toolStartedAt,
-                            elapsedMs(toolStartNanos), name, arguments, result));
-                    messages.add(ChatMessage.tool(call.id(), result));
-                    LOG.info("Tool result recorded; chars={}", result.length());
-                }
-                continue;
-            }
-            if (!"stop".equals(answer.finishReason()))
-                throw new IOException("DeepSeek stopped unexpectedly: " + answer.finishReason());
-            messages.add(ChatMessage.assistant(answer));
-            LOG.info("User turn complete");
-            return;
+        return requestId;
+    }
+
+    private AssistantTurn requestModel(String requestId, int turn, ModelSettings settings)
+            throws IOException, InterruptedException {
+        LOG.info("Model turn {}/{}; history messages={}", turn, maxTurns, messages.size());
+        String modelId = "model-" + requestId + "-" + turn;
+        int messageCount = messages.size();
+        long startedAt = System.currentTimeMillis();
+        long startNanos = System.nanoTime();
+        onTrace.accept(TraceEvent.modelStarted(modelId, turn, startedAt, messageCount));
+        AssistantTurn answer;
+        try {
+            answer = client.stream(List.copyOf(messages), tools.definitions(), onText, settings);
+        } catch (IOException | InterruptedException | RuntimeException e) {
+            String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            onTrace.accept(TraceEvent.modelFailed(modelId, turn, startedAt,
+                    elapsedMs(startNanos), messageCount, reason));
+            throw e;
         }
-        throw new IOException("agent stopped after " + maxTurns + " model turns");
+        onTrace.accept(TraceEvent.modelFinished(modelId, turn, startedAt,
+                elapsedMs(startNanos), messageCount, answer.finishReason(),
+                answer.calls().size(), answer.content()));
+        LOG.info("Model turn {} finished; reason={}; tool calls={}; text chars={}",
+                turn, answer.finishReason(), answer.calls().size(), answer.content().length());
+        traceAnswer(answer, modelId, turn);
+        return answer;
+    }
+
+    private void traceAnswer(AssistantTurn answer, String modelId, int turn) {
+        if (answer.reasoningContent() != null && !answer.reasoningContent().isBlank()) {
+            onTrace.accept(TraceEvent.reasoning("reasoning-" + modelId, turn,
+                    System.currentTimeMillis(), answer.reasoningContent()));
+        }
+        if (!answer.content().isBlank()) {
+            onTrace.accept(TraceEvent.assistant("assistant-" + modelId, turn,
+                    System.currentTimeMillis(), answer.content()));
+        }
+    }
+
+    private static void validateFinishReason(AssistantTurn answer) throws IOException {
+        if (answer.calls().isEmpty()) {
+            if (!"stop".equals(answer.finishReason())) {
+                throw new IOException("DeepSeek stopped unexpectedly: " + answer.finishReason());
+            }
+        } else if (!"tool_calls".equals(answer.finishReason())) {
+            throw new IOException("DeepSeek returned tools with unexpected finish reason: " + answer.finishReason());
+        }
+    }
+
+    private void executeTool(ToolCall call, String toolId, int turn) {
+        String name = call.function().name();
+        String arguments = call.function().arguments();
+        long startedAt = System.currentTimeMillis();
+        long startNanos = System.nanoTime();
+        onTrace.accept(TraceEvent.toolStarted(toolId, turn, startedAt, name, arguments));
+        LOG.info("Dispatching tool={}; call id={}", name, call.id());
+        onTool.accept("tool: " + name);
+        String result = tools.dispatch(call);
+        onTrace.accept(TraceEvent.toolFinished(toolId, turn, startedAt,
+                elapsedMs(startNanos), name, arguments, result));
+        messages.add(ChatMessage.tool(call.id(), result));
+        LOG.info("Tool result recorded; chars={}", result.length());
     }
 
     private static long elapsedMs(long startedAtNanos) {

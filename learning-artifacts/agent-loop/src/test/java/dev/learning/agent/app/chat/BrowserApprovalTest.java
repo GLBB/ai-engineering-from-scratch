@@ -1,4 +1,4 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.chat;
 
 import org.junit.jupiter.api.Test;
 

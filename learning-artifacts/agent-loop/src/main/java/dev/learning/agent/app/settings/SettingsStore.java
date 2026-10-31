@@ -1,4 +1,4 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.settings;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -12,7 +12,7 @@ import java.nio.file.StandardCopyOption;
 
 /** Stores the selected protocol; changes take effect when the process starts again. */
 @Service
-final class SettingsStore {
+public final class SettingsStore {
     private final ObjectMapper json;
     private final Path file;
     private final ApiProtocol activeProtocol;
@@ -28,7 +28,7 @@ final class SettingsStore {
         this.activeProtocol = read();
     }
 
-    ApiProtocol activeProtocol() { return activeProtocol; }
+    public ApiProtocol activeProtocol() { return activeProtocol; }
 
     synchronized SettingsStatus status() throws IOException {
         ApiProtocol saved = read();

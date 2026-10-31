@@ -1,4 +1,4 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.chat;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;

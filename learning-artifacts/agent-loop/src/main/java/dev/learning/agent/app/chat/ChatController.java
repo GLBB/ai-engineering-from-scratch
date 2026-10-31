@@ -1,6 +1,7 @@
-package dev.learning.agent.app;
+package dev.learning.agent.app.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.learning.agent.app.LocalRequest;
 import dev.learning.agent.deepseek.model.ModelSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -30,7 +31,7 @@ final class ChatController {
 
     @GetMapping("/api/session")
     ResponseEntity<?> session(HttpServletRequest request) {
-        if (!localHost(request)) {
+        if (!LocalRequest.isLocalHost(request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         AgentSessions.Session session = sessions.create();
@@ -39,7 +40,7 @@ final class ChatController {
 
     @PostMapping(path = "/api/chat", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<StreamingResponseBody> chat(@RequestBody Prompt body, HttpServletRequest request) {
-        if (!sameOrigin(request)) {
+        if (!LocalRequest.hasSameOrigin(request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         AgentSessions.Session session = existing(request);
@@ -93,7 +94,7 @@ final class ChatController {
 
     @PostMapping(path = "/api/approve", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<?> approve(@RequestBody Decision body, HttpServletRequest request) {
-        if (!sameOrigin(request)) {
+        if (!LocalRequest.hasSameOrigin(request)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         AgentSessions.Session session = existing(request);
@@ -108,19 +109,6 @@ final class ChatController {
 
     private AgentSessions.Session existing(HttpServletRequest request) {
         return sessions.get(request.getHeader(SESSION_HEADER));
-    }
-
-    static boolean localHost(HttpServletRequest request) {
-        String host = request.getServerName();
-        return "127.0.0.1".equals(host) || "localhost".equalsIgnoreCase(host);
-    }
-
-    static boolean sameOrigin(HttpServletRequest request) {
-        if (!localHost(request)) {
-            return false;
-        }
-        String expected = request.getScheme() + "://" + request.getServerName() + ":" + request.getServerPort();
-        return expected.equals(request.getHeader("Origin"));
     }
 
     record Prompt(String prompt, String model, String reasoningLevel) {}
