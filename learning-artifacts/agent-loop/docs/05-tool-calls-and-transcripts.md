@@ -2,7 +2,7 @@
 
 [返回目录](README.md) · 上一篇：[动手运行和调试](04-run-and-debug.md)
 
-本文对应 Agent Loop 练习中的三个问题：三个调用只执行两个、怎样结束循环，以及工具结果怎样关联调用。协议说明于 2026-11-01 对照官方文档核对；实验使用本项目真实的请求适配器和本地计算器，不发送模型 HTTP 请求。
+本文对应 Agent Loop 练习中的三个问题：三个调用只执行两个、怎样结束循环，以及工具结果怎样关联调用。协议说明于 2026-11-01 对照官方文档核对。离线实验检查项目请求适配器的行为；真实 API 实验另行记录 DeepSeek 三种接口的 HTTP 状态与模型回复。
 
 ## 先预测，再运行
 
@@ -34,7 +34,7 @@ mvn -Dtest=ToolTranscriptExperimentTest,AgentLoopTest test
 
 模型的 assistant 消息仍然声明了三个调用，宿主却只提供两个结果。第三个调用没有成功、失败或拒绝的记录，下一次请求的工具往返还没有完成。对于要求完整配对的接口，这种历史会被拒绝。Anthropic 文档明确要求工具结果紧跟调用消息，并说明缺少对应结果的错误。[官方结果格式要求](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
 
-本地实验还发现一个边界：当前三个适配器只转换消息格式，都能把这份不完整历史序列化出来。JSON 可以生成，不代表服务端会接受。这里没有验证真实服务端的状态码或错误文案，也没有实测模型面对这份历史的行为。
+本地实验还发现一个边界：当前三个适配器只转换消息格式，都能把这份不完整历史序列化出来。JSON 可以生成，不代表服务端会接受。离线实验本身没有验证服务端响应；下面的真实 API 实验确认，这份缺少结果的历史会被 DeepSeek 三种接口拒绝。
 
 如果运行策略允许执行前两个，可以保留原来的三个调用，为第三个补上真实的拒绝结果：
 
@@ -47,6 +47,48 @@ mvn -Dtest=ToolTranscriptExperimentTest,AgentLoopTest test
 实验中的 Anthropic 适配器仍沿用项目现有的字符串错误观察，尚未建模 `is_error`；因此该实验验证的是结果配对，没有验证结构化错误标记。实验也没有修改实际 `AgentLoop` 的执行策略，应用目前仍按顺序执行模型返回的全部调用。
 
 另一种策略是在执行任何工具之前拒绝整批调用。无论选哪种策略，都要明确区分“本批执行次数上限”和“整个用户轮次的总预算”：模型可能在下次请求里重新发起刚才未执行的调用。预算耗尽应报告未完成，不能当作成功。
+
+## DeepSeek 真实 API 实测
+
+2026-11-01 01:11–01:14（Asia/Shanghai），使用环境变量中的 DeepSeek key，向 `https://api.deepseek.com` 发起了 12 次请求。模型为 `deepseek-flash`，关闭思考，使用非流式响应，每个请求的输出上限为 512 tokens。
+
+每种协议先请求一次，让真实模型同时生成三个 `calculator` 调用，参数依次为 `1+2`、`4*5`、`6-1`。保留这条模型实际返回的调用消息，再从同一个历史分出三组后续请求。三组使用相同工具定义、系统提示和模型设置，只改变工具结果。
+
+| 后续请求 | Chat Completions | Responses | Anthropic 兼容接口 |
+| --- | --- | --- | --- |
+| `full`：执行三次，返回三个结果 | HTTP 200 | HTTP 200 | HTTP 200 |
+| `missing`：只执行前两次，仅返回两个结果 | HTTP 400 | HTTP 400 | HTTP 400 |
+| `skipped`：只执行前两次，第三个返回未执行错误 | HTTP 200 | HTTP 200 | HTTP 200 |
+
+三次缺失结果请求都返回 `invalid_request_error`，错误消息的关键部分如下；调用 ID 和 request ID 省略：
+
+```text
+Chat Completions:
+An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'.
+(insufficient tool messages following tool_calls message)
+
+Responses:
+No tool output found for tool call <第三个调用的 ID>.
+
+Anthropic 兼容接口:
+`tool_use` ids were found without `tool_result` blocks immediately after: <第三个调用的 ID>.
+Each `tool_use` block must have a corresponding `tool_result` block in the next message.
+```
+
+完整结果组中，模型都正常汇总 `3`、`20` 和 `5`。未执行错误组中，第三个结果为 `error: not executed; max_tool_calls_per_turn=2`，Anthropic 格式还设置了 `is_error: true`。三种接口的模型都明确报告第三项未执行，并提出可以另行重试；没有把第三项声称为已成功计算。本次没有自动跟进重试。
+
+这次实测说明：在上述条件下，只回传两个结果会让下一次请求直接失败；第三个调用即使不执行，也需要有明确的对应结果。这些结果适用于本次 DeepSeek 兼容接口，未实测 OpenAI、Anthropic 原生服务或 Bedrock，也未覆盖其他模型、思考模式和流式响应。
+
+可复现脚本为 [experiments/deepseek_tool_limit.py](../experiments/deepseek_tool_limit.py)，仅依赖 Python 标准库。它从环境读取 key，只向官方 DeepSeek 域名发送固定算术数据，不读取或上传项目文件。运行命令会实际调用模型；每种协议最多尝试三次取得符合条件的调用消息，再发起三次对照请求。
+
+```bash
+# 已在环境中设置 DEEPSEEK_API_KEY 后，在本项目目录执行。
+python3 experiments/deepseek_tool_limit.py
+# 只复现 Chat Completions：
+python3 experiments/deepseek_tool_limit.py --protocol chat
+```
+
+请求体、响应体和 `summary.json` 写入 `target/deepseek-tool-limit-live/<UTC时间>/`，不记录认证头，也不提交生成记录。本次记录目录为 `target/deepseek-tool-limit-live/20261031T171123075834Z/`；目录时间为 UTC，换算到上海时间是 2026-11-01。
 
 ## 没有工具调用，能证明任务完成吗
 
