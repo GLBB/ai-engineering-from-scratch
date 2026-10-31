@@ -1,6 +1,6 @@
 # 5. 工具调用上限、终止条件和对话记录
 
-[返回目录](README.md) · 上一篇：[动手运行和调试](04-run-and-debug.md)
+[返回目录](README.md) · 上一篇：[动手运行和调试](04-run-and-debug.md) · 下一篇：[用同一段对话理解三种协议](06-three-protocols-by-example.md)
 
 本文对应 Agent Loop 练习中的三个问题：三个调用只执行两个、怎样结束循环，以及工具结果怎样关联调用。协议说明于 2026-11-01 对照官方文档核对。离线实验检查项目请求适配器的行为；真实 API 实验另行记录 DeepSeek 三种接口的 HTTP 状态与模型回复。
 
@@ -75,7 +75,7 @@ Anthropic 兼容接口:
 Each `tool_use` block must have a corresponding `tool_result` block in the next message.
 ```
 
-完整结果组中，模型都正常汇总 `3`、`20` 和 `5`。未执行错误组中，第三个结果为 `error: not executed; max_tool_calls_per_turn=2`，Anthropic 格式还设置了 `is_error: true`。三种接口的模型都明确报告第三项未执行，并提出可以另行重试；没有把第三项声称为已成功计算。本次没有自动跟进重试。
+完整结果组中，模型都正常汇总 `3`、`20` 和 `5`。未执行错误组中，第三个结果为 `error: not executed; max_tool_calls_per_turn=2`，Anthropic 格式还设置了 `is_error: true`。DeepSeek 当前兼容文档说明 `is_error` 会被忽略，因此这次实测不能证明结构化错误标记生效，错误详情仍通过 content 传递。三种接口的模型都明确报告第三项未执行，并提出可以另行重试；没有把第三项声称为已成功计算。本次没有自动跟进重试。[DeepSeek Anthropic 兼容说明](https://api-docs.deepseek.com/guides/anthropic_api/)
 
 这次实测说明：在上述条件下，只回传两个结果会让下一次请求直接失败；第三个调用即使不执行，也需要有明确的对应结果。这些结果适用于本次 DeepSeek 兼容接口，未实测 OpenAI、Anthropic 原生服务或 Bedrock，也未覆盖其他模型、思考模式和流式响应。
 

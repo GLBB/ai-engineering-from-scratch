@@ -2,6 +2,8 @@
 
 [返回目录](README.md) · 上一篇：[一次对话如何运行](02-agent-loop.md) · 下一篇：[动手运行和调试](04-run-and-debug.md)
 
+想先看角色和报文的完整对应关系，可以读[用同一段对话理解三种协议](06-three-protocols-by-example.md)：同一个实测例子展示 system、user、assistant、工具调用与结果在三种格式中的位置。
+
 ## 为什么有三个客户端
 
 [ChatModel](../src/main/java/dev/learning/agent/core/ChatModel.java) 是 Agent 循环使用的接口：传入历史消息、工具定义、文本回调和模型设置，返回一次完整的 `AssistantTurn`。三个客户端都实现这个接口：

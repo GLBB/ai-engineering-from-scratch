@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="1080" viewBox="0 0 1560 1080" role="img" aria-labelledby="title desc" font-family="WenQuanYi Micro Hei, Microsoft YaHei, sans-serif" fill="#172033">
+  <title id="title">同一份工具对话，在三种协议中怎样表示</title>
+  <desc id="desc">Chat Completions 用 system、user、assistant 和 tool 消息；Responses 用 instructions 和带类型的 items；Anthropic 用顶层 system、assistant 工具调用块和 user 工具结果块。颜色按内容来源区分，宿主程序负责执行工具。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="none" stroke="#94a3b8" stroke-width="1.5"/></marker>
+  </defs>
+  <rect width="1560" height="1080" fill="#f8fafc"/>
+  <text x="40" y="53" font-size="32" font-weight="700">同一份对话，三种协议的装箱方法</text>
+  <text x="40" y="88" font-size="19">实测例子：计算 1+2、4*5、6-1。长 ID 简写为 a、b、c；按内容来源着色。</text>
+  <circle cx="51" cy="124" r="9" fill="#d97706"/><text x="70" y="131" font-size="19">[S] 应用规则</text>
+  <circle cx="301" cy="124" r="9" fill="#2563eb"/><text x="320" y="131" font-size="19">[U] 用户问题</text>
+  <circle cx="551" cy="124" r="9" fill="#7c3aed"/><text x="570" y="131" font-size="19">[A] 模型输出</text>
+  <circle cx="801" cy="124" r="9" fill="#059669"/><text x="820" y="131" font-size="19">[T] 工具结果</text>
+  <circle cx="1051" cy="124" r="9" fill="#64748b"/><text x="1070" y="131" font-size="19">[H] 宿主执行与组装</text>
+
+  <g transform="translate(40 0)">
+    <text x="0" y="182" font-size="24" font-weight="700">Chat Completions</text>
+    <text x="0" y="208" font-size="17" fill="#475569">messages：逐条记录说话者</text>
+    <rect x="0" y="228" width="480" height="82" fill="#fffbeb" stroke="#d97706" stroke-width="2" rx="12"/>
+    <text x="20" y="258" font-size="20" font-weight="700">[S] 先用工具，再根据结果回答</text>
+    <text x="20" y="288" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">messages[0].role = "system"</text>
+    <line x1="240" y1="313" x2="240" y2="327" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="336" width="480" height="82" fill="#eff6ff" stroke="#2563eb" stroke-width="2" rx="12"/>
+    <text x="20" y="366" font-size="20" font-weight="700">[U] 请计算三个表达式</text>
+    <text x="20" y="396" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">messages[1].role = "user"</text>
+    <line x1="240" y1="421" x2="240" y2="435" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="444" width="480" height="130" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" rx="12"/>
+    <text x="20" y="474" font-size="20" font-weight="700">[A1] 模型请求三次工具调用</text>
+    <text x="20" y="504" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">role = "assistant"</text>
+    <text x="20" y="533" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">tool_calls = [a, b, c]</text>
+    <text x="20" y="558" font-size="17" fill="#475569">本次响应 finish_reason = tool_calls</text>
+    <line x1="240" y1="577" x2="240" y2="591" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="600" width="480" height="148" fill="#ecfdf5" stroke="#059669" stroke-width="2" rx="12"/>
+    <text x="20" y="630" font-size="20" font-weight="700">[T] 三条独立的 tool 消息</text>
+    <text x="20" y="661" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">tool_call_id: a    content: "3"</text>
+    <text x="20" y="691" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">tool_call_id: b    content: "20"</text>
+    <text x="20" y="721" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">tool_call_id: c    content: "5"</text>
+    <line x1="240" y1="751" x2="240" y2="765" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="774" width="480" height="104" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" rx="12"/>
+    <text x="20" y="804" font-size="20" font-weight="700">[A2] 新响应：结果是 3、20、5</text>
+    <text x="20" y="834" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">choices[0].message.role</text>
+    <text x="20" y="860" font-size="17" fill="#475569">= assistant；finish_reason = stop</text>
+  </g>
+
+  <g transform="translate(540 0)">
+    <text x="0" y="182" font-size="24" font-weight="700">Responses</text>
+    <text x="0" y="208" font-size="17" fill="#475569">input / output：逐项记录发生的事情</text>
+    <rect x="0" y="228" width="480" height="82" fill="#fffbeb" stroke="#d97706" stroke-width="2" rx="12"/>
+    <text x="20" y="258" font-size="20" font-weight="700">[S] 先用工具，再根据结果回答</text>
+    <text x="20" y="288" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">instructions = "..."</text>
+    <line x1="240" y1="313" x2="240" y2="327" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="336" width="480" height="82" fill="#eff6ff" stroke="#2563eb" stroke-width="2" rx="12"/>
+    <text x="20" y="366" font-size="20" font-weight="700">[U] 请计算三个表达式</text>
+    <text x="20" y="396" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">input[0].role = "user"</text>
+    <line x1="240" y1="421" x2="240" y2="435" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="444" width="480" height="130" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" rx="12"/>
+    <text x="20" y="474" font-size="20" font-weight="700">[A1] 模型输出三个调用 item</text>
+    <text x="20" y="504" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">type = "function_call"</text>
+    <text x="20" y="533" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">call_id = a / b / c</text>
+    <text x="20" y="558" font-size="17" fill="#475569">没有 role 字段，仍然是模型的输出</text>
+    <line x1="240" y1="577" x2="240" y2="591" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="600" width="480" height="148" fill="#ecfdf5" stroke="#059669" stroke-width="2" rx="12"/>
+    <text x="20" y="630" font-size="20" font-weight="700">[T] 三个 function_call_output</text>
+    <text x="20" y="661" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">call_id: a    output: "3"</text>
+    <text x="20" y="691" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">call_id: b    output: "20"</text>
+    <text x="20" y="721" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">call_id: c    output: "5"</text>
+    <line x1="240" y1="751" x2="240" y2="765" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="774" width="480" height="104" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" rx="12"/>
+    <text x="20" y="804" font-size="20" font-weight="700">[A2] 新响应：结果是 3、20、5</text>
+    <text x="20" y="834" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">output[0].type = "message"</text>
+    <text x="20" y="860" font-size="17" fill="#475569">role = assistant；内容类型 output_text</text>
+  </g>
+
+  <g transform="translate(1040 0)">
+    <text x="0" y="182" font-size="24" font-weight="700">Anthropic Messages</text>
+    <text x="0" y="208" font-size="17" fill="#475569">消息的 content 内放不同类型的块</text>
+    <rect x="0" y="228" width="480" height="82" fill="#fffbeb" stroke="#d97706" stroke-width="2" rx="12"/>
+    <text x="20" y="258" font-size="20" font-weight="700">[S] 先用工具，再根据结果回答</text>
+    <text x="20" y="288" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">system = "..."</text>
+    <line x1="240" y1="313" x2="240" y2="327" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="336" width="480" height="82" fill="#eff6ff" stroke="#2563eb" stroke-width="2" rx="12"/>
+    <text x="20" y="366" font-size="20" font-weight="700">[U] 请计算三个表达式</text>
+    <text x="20" y="396" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">messages[0].role = "user"</text>
+    <line x1="240" y1="421" x2="240" y2="435" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="444" width="480" height="130" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" rx="12"/>
+    <text x="20" y="474" font-size="20" font-weight="700">[A1] assistant 消息的三个块</text>
+    <text x="20" y="504" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">content[].type = "tool_use"</text>
+    <text x="20" y="533" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">id = a / b / c</text>
+    <text x="20" y="558" font-size="17" fill="#475569">本次响应 stop_reason = tool_use</text>
+    <line x1="240" y1="577" x2="240" y2="591" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="600" width="480" height="148" fill="#ecfdf5" stroke="#059669" stroke-width="2" rx="12"/>
+    <text x="20" y="630" font-size="20" font-weight="700">[T] 一条 user 消息的三个结果块</text>
+    <text x="20" y="661" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">type: "tool_result"</text>
+    <text x="20" y="691" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">tool_use_id: a / b / c</text>
+    <text x="20" y="721" font-size="17" fill="#475569">这里的 user 不是人在发言，是宿主回填</text>
+    <line x1="240" y1="751" x2="240" y2="765" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="0" y="774" width="480" height="104" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" rx="12"/>
+    <text x="20" y="804" font-size="20" font-weight="700">[A2] 新响应：结果是 3、20、5</text>
+    <text x="20" y="834" font-family="WenQuanYi Micro Hei Mono, monospace" font-size="18">role = "assistant"</text>
+    <text x="20" y="860" font-size="17" fill="#475569">content[].type = text；stop_reason = end_turn</text>
+  </g>
+
+  <rect x="40" y="910" width="1480" height="64" rx="12" fill="#e2e8f0"/>
+  <text x="60" y="938" font-size="20" font-weight="700">[H] 宿主程序：保存 A1 → 执行工具 → 逐个绑定原调用 ID → 回填结果 → 再次请求模型</text>
+  <text x="60" y="962" font-size="17" fill="#475569">宿主不是协议中的 host 角色；tools 是能力说明书；工具调用由模型提出，工具由程序执行。</text>
+  <text x="40" y="1012" font-size="19">请求 1：规则 + 用户 + 工具定义。请求 2：规则 + 用户 + 原调用 + 全部结果 + 工具定义。</text>
+  <text x="40" y="1046" font-size="17" fill="#475569">本例思考关闭。开启思考时，reasoning_content / reasoning item / thinking block 都不构成新的说话者角色。</text>
+</svg>
