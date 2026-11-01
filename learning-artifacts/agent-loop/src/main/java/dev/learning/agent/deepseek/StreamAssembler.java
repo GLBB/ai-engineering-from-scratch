@@ -1,12 +1,14 @@
 package dev.learning.agent.deepseek;
 
-import dev.learning.agent.deepseek.model.AssistantTurn;
-import dev.learning.agent.deepseek.model.ChatChunk;
 import dev.learning.agent.deepseek.model.ChatChunk.ChunkChoice;
 import dev.learning.agent.deepseek.model.ChatChunk.ChunkDelta;
 import dev.learning.agent.deepseek.model.ChatChunk.ToolCallDelta;
-import dev.learning.agent.deepseek.model.ToolCall;
-import dev.learning.agent.deepseek.model.ToolCall.FunctionCall;
+import dev.learning.agent.deepseek.model.ChatChunk;
+import dev.learning.agent.deepseek.model.ProviderUsage;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.TokenUsage;
+import dev.learning.agent.model.ToolCall.FunctionCall;
+import dev.learning.agent.model.ToolCall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -34,7 +36,7 @@ public final class StreamAssembler {
     private String finishReason;
     private boolean done;
     private int chunks;
-    private dev.learning.agent.deepseek.model.TokenUsage usage;
+    private TokenUsage usage;
 
     public StreamAssembler(ObjectMapper json, Consumer<String> onText) {
         this.json = json;
@@ -74,8 +76,8 @@ public final class StreamAssembler {
         if (event.isEmpty()) return;
         if ("[DONE]".contentEquals(event)) { done = true; return; }
         ChatChunk chunk = json.readValue(event.toString(), ChatChunk.class);
-        usage = dev.learning.agent.deepseek.model.TokenUsage.merge(usage,
-                dev.learning.agent.deepseek.model.TokenUsage.from(chunk.usage()));
+        usage = TokenUsage.merge(usage,
+                ProviderUsage.toTokenUsage(chunk.usage()));
         chunks++;
         if (chunk.choices() == null) return;
         for (ChunkChoice choice : chunk.choices()) {

@@ -1,6 +1,6 @@
 package dev.learning.agent.deepseek;
 
-import dev.learning.agent.deepseek.model.AssistantTurn;
+import dev.learning.agent.model.AssistantTurn;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

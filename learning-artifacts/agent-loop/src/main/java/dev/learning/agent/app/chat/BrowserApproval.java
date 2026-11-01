@@ -1,7 +1,7 @@
 package dev.learning.agent.app.chat;
 
-import dev.learning.agent.core.RunControl;
-import dev.learning.agent.core.RunScope;
+import dev.learning.agent.core.runtime.RunControl;
+import dev.learning.agent.core.runtime.RunScope;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;

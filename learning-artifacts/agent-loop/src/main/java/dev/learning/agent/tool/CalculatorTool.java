@@ -1,11 +1,12 @@
 package dev.learning.agent.tool;
 
-import dev.learning.agent.deepseek.model.ToolSpec;
-import dev.learning.agent.deepseek.model.ToolSpec.FunctionSpec;
-import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
+import dev.learning.agent.core.runtime.RunContext;
+import dev.learning.agent.core.runtime.RunScope;
+import dev.learning.agent.model.ToolSpec.FunctionSpec;
+import dev.learning.agent.model.ToolSpec.ParameterSchema;
+import dev.learning.agent.model.ToolSpec;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.*;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

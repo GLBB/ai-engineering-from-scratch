@@ -1,11 +1,18 @@
 package dev.learning.agent.core.planexecute;
 
-import dev.learning.agent.core.*;
 import dev.learning.agent.core.planning.Prompts;
 import dev.learning.agent.core.planning.TaskInput;
-import dev.learning.agent.core.rewoo.RewooPlanParser;
-import dev.learning.agent.deepseek.model.ChatMessage;
-import dev.learning.agent.deepseek.model.ModelSettings;
+import dev.learning.agent.core.react.EngineRequest;
+import dev.learning.agent.core.react.EngineResult;
+import dev.learning.agent.core.react.EngineStop;
+import dev.learning.agent.core.react.ReActEngine;
+import dev.learning.agent.core.runtime.Evidence;
+import dev.learning.agent.core.runtime.RunContext;
+import dev.learning.agent.core.runtime.RunScope;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.support.json.StrictJson;
+
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
@@ -26,7 +33,7 @@ public final class StepExecutor {
             StrictJson.fields(node, "status", "summary", "evidenceIds");
             String status = StrictJson.text(node, "status");
             String summary = StrictJson.text(node, "summary");
-            var ids = RewooPlanParser.strings(node, "evidenceIds");
+            var ids = StrictJson.strings(node, "evidenceIds");
             for (String id : ids) context.evidence().requireUsable(id);
             if (!Set.of("COMPLETE", "INCOMPLETE", "FAILED", "DENIED", "CANCELLED").contains(status))
                 throw new IOException("invalid step status");

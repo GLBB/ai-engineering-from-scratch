@@ -1,8 +1,8 @@
 package dev.learning.agent.core.planexecute;
 
+import dev.learning.agent.support.json.StrictJson;
+
 import com.fasterxml.jackson.databind.JsonNode;
-import dev.learning.agent.core.StrictJson;
-import dev.learning.agent.core.rewoo.RewooPlanParser;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,7 +32,7 @@ public final class GoalPlans {
                 throw new IOException("minEvidence must be an integer in 0..8");
             steps.add(new GoalStep(StrictJson.text(step, "id"), StrictJson.text(step, "goal"),
                     StrictJson.text(step, "successCriteria"), minimum.intValue(),
-                    RewooPlanParser.strings(step, "allowedTools"), RewooPlanParser.strings(step, "dependsOn")));
+                    StrictJson.strings(step, "allowedTools"), StrictJson.strings(step, "dependsOn")));
         }
         return List.copyOf(steps);
     }
@@ -68,7 +68,7 @@ public final class GoalPlans {
                 StrictJson.fields(node, "decision", "reason", "status", "answerEvidence");
                 String status = StrictJson.text(node, "status");
                 if (!Set.of("COMPLETE", "PARTIAL").contains(status)) throw new IOException("invalid finish status");
-                yield new ReplanDecision.FinishDecision(reason, status, RewooPlanParser.strings(node, "answerEvidence"));
+                yield new ReplanDecision.FinishDecision(reason, status, StrictJson.strings(node, "answerEvidence"));
             }
             default -> throw new IOException("unknown replanning decision");
         };

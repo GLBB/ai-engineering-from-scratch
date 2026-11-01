@@ -1,8 +1,14 @@
 package dev.learning.agent.deepseek;
 
+import dev.learning.agent.deepseek.model.ChatRequest;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelRequest;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.ModelUse;
+import dev.learning.agent.model.OutputMode;
+import dev.learning.agent.model.TokenUsage;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.*;
-import dev.learning.agent.deepseek.model.*;
 import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;

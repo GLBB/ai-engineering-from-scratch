@@ -1,11 +1,12 @@
 package dev.learning.agent.deepseek;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.ChatModel;
-import dev.learning.agent.core.ModelRequest;
-import dev.learning.agent.core.RunControl;
-import dev.learning.agent.deepseek.model.AssistantTurn;
+import dev.learning.agent.core.runtime.RunControl;
 import dev.learning.agent.deepseek.model.ChatRequest;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatModel;
+import dev.learning.agent.model.ModelRequest;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.function.Consumer;

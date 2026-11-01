@@ -1,7 +1,8 @@
 package dev.learning.agent.core.rewoo;
 
+import dev.learning.agent.tool.ToolInput;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
-import dev.learning.agent.core.ToolInput;
 import java.util.List;
 
 public record RewooPlan(int version, List<Step> steps, List<String> answerEvidence) {

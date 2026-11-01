@@ -1,11 +1,11 @@
 package dev.learning.agent.deepseek;
 
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelSettings;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.deepseek.model.AssistantTurn;
-import dev.learning.agent.deepseek.model.ChatMessage;
-import dev.learning.agent.deepseek.model.ModelSettings;
-import dev.learning.agent.deepseek.model.ToolCall;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;

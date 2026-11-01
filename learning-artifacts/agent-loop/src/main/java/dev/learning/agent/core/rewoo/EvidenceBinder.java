@@ -1,7 +1,14 @@
 package dev.learning.agent.core.rewoo;
 
-import dev.learning.agent.core.*;
 import dev.learning.agent.core.planning.PlanValidationException;
+import dev.learning.agent.core.runtime.EvidenceStore;
+import dev.learning.agent.support.json.StrictJson;
+import dev.learning.agent.tool.BashInput;
+import dev.learning.agent.tool.CalculatorInput;
+import dev.learning.agent.tool.SearchInput;
+import dev.learning.agent.tool.ToolInput;
+import dev.learning.agent.tool.ToolInputDecoder;
+
 import java.io.IOException;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -43,6 +50,6 @@ public final class EvidenceBinder {
         if (template instanceof CalculatorInput) bound = new CalculatorInput(text.toString());
         else if (template instanceof SearchInput) bound = new SearchInput(text.toString());
         else bound = new BashInput(text.toString());
-        return StrictJson.toolInput(bound.toolName(), StrictJson.write(bound));
+        return ToolInputDecoder.decode(bound.toolName(), StrictJson.write(bound));
     }
 }

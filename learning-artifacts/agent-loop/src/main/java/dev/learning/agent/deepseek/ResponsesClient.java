@@ -1,21 +1,21 @@
 package dev.learning.agent.deepseek;
 
+import dev.learning.agent.core.runtime.RunControl;
+import dev.learning.agent.deepseek.model.ProviderUsage;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ChatModel;
+import dev.learning.agent.model.ModelRequest;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.ModelUse;
+import dev.learning.agent.model.OutputMode;
+import dev.learning.agent.model.ToolCall;
+import dev.learning.agent.model.ToolSpec;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.ChatModel;
-import dev.learning.agent.deepseek.model.TokenUsage;
-import dev.learning.agent.deepseek.model.ProviderUsage;
-import dev.learning.agent.core.ModelRequest;
-import dev.learning.agent.core.RunControl;
-import dev.learning.agent.core.ModelUse;
-import dev.learning.agent.core.OutputMode;
-import dev.learning.agent.deepseek.model.AssistantTurn;
-import dev.learning.agent.deepseek.model.ChatMessage;
-import dev.learning.agent.deepseek.model.ModelSettings;
-import dev.learning.agent.deepseek.model.ToolCall;
-import dev.learning.agent.deepseek.model.ToolSpec;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -125,7 +125,7 @@ public final class ResponsesClient implements ChatModel {
             }
         }
         return new AssistantTurn(text.toString(), List.copyOf(calls), calls.isEmpty() ? "stop" : "tool_calls",
-                reasoning.isEmpty() ? null : reasoning.toString(), null, TokenUsage.from(completed[0].usage()));
+                reasoning.isEmpty() ? null : reasoning.toString(), null, ProviderUsage.toTokenUsage(completed[0].usage()));
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

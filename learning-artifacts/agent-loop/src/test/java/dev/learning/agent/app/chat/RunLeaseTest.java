@@ -1,7 +1,10 @@
 package dev.learning.agent.app.chat;
 
-import dev.learning.agent.core.*;
-import dev.learning.agent.deepseek.model.*;
+import dev.learning.agent.core.AgentMode;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatModel;
+import dev.learning.agent.model.ModelSettings;
+
 import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 import java.util.List;

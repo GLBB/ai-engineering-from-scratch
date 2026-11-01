@@ -1,8 +1,10 @@
 package dev.learning.agent.core.rewoo;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import dev.learning.agent.core.StrictJson;
 import dev.learning.agent.core.planning.PlanValidationException;
+import dev.learning.agent.support.json.StrictJson;
+import dev.learning.agent.tool.ToolInputDecoder;
+
+import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,19 +25,8 @@ public final class RewooPlanParser {
             StrictJson.fields(step, "id", "purpose", "tool", "arguments");
             String tool = StrictJson.text(step, "tool");
             steps.add(new RewooPlan.Step(StrictJson.text(step, "id"), StrictJson.text(step, "purpose"),
-                    StrictJson.toolInput(tool, StrictJson.write(step.get("arguments")))));
+                    ToolInputDecoder.decode(tool, StrictJson.write(step.get("arguments")))));
         }
-        return new RewooPlan(1, steps, strings(root, "answerEvidence"));
-    }
-    public static List<String> strings(JsonNode root, String field) throws IOException {
-        JsonNode values = root.get(field);
-        if (values == null || !values.isArray()) throw new PlanValidationException(field + " must be an array");
-        List<String> result = new ArrayList<>();
-        for (JsonNode value : values) {
-            if (!value.isTextual() || value.asText().isBlank()) throw new PlanValidationException("invalid " + field);
-            if (result.contains(value.asText())) throw new PlanValidationException("duplicate " + field);
-            result.add(value.asText());
-        }
-        return List.copyOf(result);
+        return new RewooPlan(1, steps, StrictJson.strings(root, "answerEvidence"));
     }
 }

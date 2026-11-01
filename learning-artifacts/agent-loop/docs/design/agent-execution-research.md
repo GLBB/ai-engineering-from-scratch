@@ -27,13 +27,13 @@
 | 观察点 | 证据位置 | 影响 |
 | --- | --- | --- |
 | 每个 Session 只构造一个 AgentLoop，且已有会话级运行锁 | [AgentSessions.java](../../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) | 新对话首次接受消息时选择唯一 runner，模式绑定与运行锁获取需要原子完成 |
-| 模型接口返回 AssistantTurn，支持独立文本回调 | [ChatModel.java](../../src/main/java/dev/learning/agent/core/ChatModel.java) | Planner 可缓冲，Solver 可流式输出；无需重新写三个 HTTP 客户端 |
+| 模型接口返回 AssistantTurn，支持独立文本回调 | [ChatModel.java](../../src/main/java/dev/learning/agent/model/ChatModel.java) | Planner 可缓冲，Solver 可流式输出；无需重新写三个 HTTP 客户端 |
 | 模型设置和运行中的控件已有发送时快照与禁用逻辑 | [app.js](../../src/main/resources/static/app.js) | 模型设置继续每轮选择；模式按学习者要求增加对话级固定规则 |
 | 设置文件只保存协议，启动时固定实际客户端 | [SettingsStore.java](../../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) | 执行模式属于对话状态，不混入需要重启的全局设置 |
 | 所有当前工具均使用具体的单字符串参数 | [CalculatorTool](../../src/main/java/dev/learning/agent/tool/CalculatorTool.java)、[SearchTool](../../src/main/java/dev/learning/agent/tool/SearchTool.java)、[BashTool](../../src/main/java/dev/learning/agent/tool/BashTool.java) | 首版可用明确的参数类型实现引用绑定，不需要通用 JSON 模板引擎 |
 | 工具返回字符串；Bash 非零退出会体现在字符串中 | [ToolRegistry.java](../../src/main/java/dev/learning/agent/tool/ToolRegistry.java)、BashTool | 需要结构化状态，不能仅靠字符串是否以 error 开头判断依赖成功 |
-| 工具结束轨迹当前统一 complete | [TraceEvent.java](../../src/main/java/dev/learning/agent/core/TraceEvent.java) | 状态展示要与真实执行结果对齐 |
-| AgentLoop.run 返回 void，直接输出文本，模型轮次限额位于循环内部 | 旧 AgentLoop（已删除；现见 [ReActRunner](../../src/main/java/dev/learning/agent/core/ReActRunner.java) 与 [ReActEngine](../../src/main/java/dev/learning/agent/core/DefaultReActEngine.java)） | P&E 需要提取能返回结构化步骤结果的 ReActEngine，并传入外层共享预算，而非为每个步骤直接调用旧 run |
+| 工具结束轨迹当前统一 complete | [TraceEvent.java](../../src/main/java/dev/learning/agent/core/runtime/TraceEvent.java) | 状态展示要与真实执行结果对齐 |
+| AgentLoop.run 返回 void，直接输出文本，模型轮次限额位于循环内部 | 旧 AgentLoop（已删除；现见 [ReActRunner](../../src/main/java/dev/learning/agent/core/react/ReActRunner.java) 与 [ReActEngine](../../src/main/java/dev/learning/agent/core/react/DefaultReActEngine.java)） | P&E 需要提取能返回结构化步骤结果的 ReActEngine，并传入外层共享预算，而非为每个步骤直接调用旧 run |
 | trace.js 只按模型和工具种类统计，未包含计划节点 | [trace.js](../../src/main/resources/static/trace.js) | 计划节点状态与实际工具调用计数需要分别管理 |
 
 ## 3. 离线探针：实际调用当前类
@@ -161,3 +161,13 @@ python3 experiments/execution_matrix.py
 矩阵脚本会真实调用 API 并产生相应费用，使用本机端口 18981–18983；不执行 Bash 或搜索。浏览器操作没有纳入默认 Maven 测试。
 
 真实接口尚未覆盖 High/Max、Exa 搜索、Bash 的允许/拒绝/超时、复杂任务的语义质量和长期稳定性；相应拒绝与取消边界通过确定性测试验证。矩阵中的计划均无需修订；重规划使用脚本模型的失败恢复案例测试，不宣称已经完成真实复杂任务评估。所有成功结果仍保留 completionCheck=UNVERIFIED。
+
+## 分包重构验证（2026-11-01）
+
+按职责将 core 根包从 45 个类收敛到 6 个入口与结果契约；运行控制移到 core.runtime，ReAct 移到 core.react，共享模型契约移到 model，工具类型和执行服务移到 tool，严格 JSON 操作移到 support.json。DeepSeek 协议 DTO 继续留在 deepseek.model，测试包跟随生产包。
+
+P&E 不再通过 RewooPlanParser 读取字符串数组；两者改用 StrictJson.strings。ToolInputDecoder 承担具体工具参数解码。ProviderUsage 在协议包中转换为 TokenUsage，共享用量类型不再引用协议 DTO。RunContext.trace 统一作用域事件，工具服务不依赖模型 Gateway 的静态轨迹方法。包归属和协作关系见[架构说明](../01-architecture.md#为什么这样分)。
+
+本轮验证：`mvn clean package` 通过 91 项 Java 测试，其中包括 4 项 PackageStructureTest；`node --test src/test/js/*.test.js` 通过 6 项前端状态测试。文档本地链接检查无失效目标。打包后的应用使用占位凭据启动，通过会话创建、三模式目录、状态查询、无效请求不锁定模式和静态页面检查，随后停止验证进程。
+
+上节 18 组真实 API 和浏览器检查是功能实施时的记录；本轮分包验证没有发送模型请求，也没有重复执行该远程矩阵。

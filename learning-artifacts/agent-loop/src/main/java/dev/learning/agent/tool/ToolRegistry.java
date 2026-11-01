@@ -1,7 +1,7 @@
 package dev.learning.agent.tool;
 
-import dev.learning.agent.deepseek.model.ToolCall;
-import dev.learning.agent.deepseek.model.ToolSpec;
+import dev.learning.agent.model.ToolCall;
+import dev.learning.agent.model.ToolSpec;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import org.slf4j.Logger;

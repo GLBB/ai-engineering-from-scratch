@@ -92,7 +92,7 @@ python3 experiments/deepseek_tool_limit.py --protocol chat
 
 ## 没有工具调用，能证明任务完成吗
 
-[ReActRunnerTest](../src/test/java/dev/learning/agent/core/ReActRunnerTest.java) 中的 `noToolCallsEndsTheLoopEvenWhenTheTaskWasNotPerformed` 让模拟模型返回“接下来会计算”，工具调用列表为空，结束原因为 `stop`。当前循环只调用模型一次，随后正常返回；计算并未发生。
+[ReActRunnerTest](../src/test/java/dev/learning/agent/core/react/ReActRunnerTest.java) 中的 `noToolCallsEndsTheLoopEvenWhenTheTaskWasNotPerformed` 让模拟模型返回“接下来会计算”，工具调用列表为空，结束原因为 `stop`。当前循环只调用模型一次，随后正常返回；计算并未发生。
 
 这说明正常结束一次模型生成，与完成用户任务，是两个不同的判断。当前循环已经检查结束原因，因此 `length` 或流中断不会仅因没有工具调用就被当作成功；它仍然缺少业务完成条件。
 

@@ -1,5 +1,8 @@
 package dev.learning.agent.deepseek.model;
 
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.ToolSpec;
 import dev.learning.agent.tool.CalculatorTool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

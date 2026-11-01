@@ -12,7 +12,7 @@ RunLease 持有本轮 requestId、请求快照、RunContext、事件通道和工
 
 ## Runner 保存历史，Engine 执行循环
 
-从 [ReActRunner.run](../src/main/java/dev/learning/agent/core/ReActRunner.java) 开始阅读：它复制会话历史，追加本轮用户问题，把这些消息和局部限额交给 [DefaultReActEngine.execute](../src/main/java/dev/learning/agent/core/DefaultReActEngine.java)。Engine 本身不保存会话历史。
+从 [ReActRunner.run](../src/main/java/dev/learning/agent/core/react/ReActRunner.java) 开始阅读：它复制会话历史，追加本轮用户问题，把这些消息和局部限额交给 [DefaultReActEngine.execute](../src/main/java/dev/learning/agent/core/react/DefaultReActEngine.java)。Engine 本身不保存会话历史。
 
 ```mermaid
 sequenceDiagram

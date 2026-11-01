@@ -69,19 +69,18 @@ flowchart TD
 
 | 位置 | 职责 |
 | --- | --- |
-| [`app/WebMain.java`](src/main/java/dev/learning/agent/app/WebMain.java) | 启动 Spring Boot 本地服务。 |
-| [`app/chat/`](src/main/java/dev/learning/agent/app/chat/) | 创建页面会话、流式发送事件和处理 Bash 确认。 |
-| [`app/settings/`](src/main/java/dev/learning/agent/app/settings/) | 读取和保存协议设置；保存后重启生效。 |
-| [`app/LocalRequest.java`](src/main/java/dev/learning/agent/app/LocalRequest.java) | 检查本地请求的主机和来源。 |
-| [`core/TraceEvent.java`](src/main/java/dev/learning/agent/core/TraceEvent.java) | 定义模型、工具和助手步骤的轨迹事件。 |
-| [`static/`](src/main/resources/static/) | 浏览器页面、样式和交互脚本。 |
-| [`core/ReActRunner.java`](src/main/java/dev/learning/agent/core/ReActRunner.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
-| [`deepseek/ChatCompletionsClient.java`](src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) | 处理 Chat Completions 请求和流式响应。 |
-| [`deepseek/ResponsesClient.java`](src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | 处理 Responses 请求、历史消息和流式事件。 |
-| [`deepseek/AnthropicClient.java`](src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | 处理 Anthropic 内容块、工具结果和流式事件。 |
-| [`deepseek/StreamAssembler.java`](src/main/java/dev/learning/agent/deepseek/StreamAssembler.java) | 读取 SSE 事件，输出文本片段，按索引合并工具调用及参数片段。 |
-| [`deepseek/model/`](src/main/java/dev/learning/agent/deepseek/model/) | 请求、消息、工具定义和响应实体；`ChatRequest` 注释了请求字段。 |
-| [`tool/`](src/main/java/dev/learning/agent/tool/) | 工具接口、注册表和三个工具实现。 |
+| [`app/`](src/main/java/dev/learning/agent/app/) | Spring Boot 入口、本地来源检查；`chat` 管理会话、HTTP 流和确认，`settings` 管理设置。 |
+| [`core/`](src/main/java/dev/learning/agent/core/) | 三种模式共同使用的入口与结果：AgentRunner、ExecutionRequest、RunResult、模式和状态。 |
+| [`core/runtime/`](src/main/java/dev/learning/agent/core/runtime/) | 一轮请求的 RunContext、预算、取消、证据、确认接口和运行事件。 |
+| [`core/react/`](src/main/java/dev/learning/agent/core/react/) | ReActRunner 保存历史；ReActEngine 执行可复用的反馈循环。 |
+| [`core/rewoo/`](src/main/java/dev/learning/agent/core/rewoo/) | 静态工具计划、依赖校验、参数绑定与 ReWOO Runner。 |
+| [`core/planexecute/`](src/main/java/dev/learning/agent/core/planexecute/) | 高层目标、步骤执行、计划版本、决策与 P&E Runner。 |
+| [`core/planning/`](src/main/java/dev/learning/agent/core/planning/) | 两种规划模式共用的任务快照、问答记忆、结构化模型请求和引用检查。 |
+| [`model/`](src/main/java/dev/learning/agent/model/) | 模型调用入口、Gateway，以及三种协议共用的消息、回复、工具描述和用量契约。 |
+| [`deepseek/`](src/main/java/dev/learning/agent/deepseek/) | 三个协议客户端、HTTP/SSE；`deepseek.model` 仅保留 ChatRequest、ChatChunk、ProviderUsage 协议 DTO。 |
+| [`tool/`](src/main/java/dev/learning/agent/tool/) | 工具参数和结果、ToolInputDecoder、注册与执行服务、三个具体工具。 |
+| [`support/json/`](src/main/java/dev/learning/agent/support/json/) | 严格 JSON 解析、字段读取与序列化；不认识具体工具或执行策略。 |
+| [`static/`](src/main/resources/static/) | 浏览器页面、样式、对话状态与轨迹脚本。 |
 | [`logback.xml`](src/main/resources/logback.xml) | 文件日志配置。 |
 
 上述 Java 路径的共同前缀是 `src/main/java/dev/learning/agent/`。JSON 通过 Jackson 转换为明确的 Java 类型；业务代码通过 SLF4J 记录日志，由 Logback 输出。

@@ -1,8 +1,10 @@
 package dev.learning.agent.app.chat;
 
+import dev.learning.agent.core.AgentMode;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ModelSettings;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.*;
-import dev.learning.agent.deepseek.model.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;

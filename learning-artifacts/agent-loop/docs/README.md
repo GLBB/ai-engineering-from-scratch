@@ -11,7 +11,7 @@
 5. [工具调用上限、终止条件和对话记录](05-tool-calls-and-transcripts.md)：运行离线实验，对比四种 API 的调用与结果格式。
 6. [用同一段对话理解三种协议](06-three-protocols-by-example.md)：用固定颜色标出所有内容来源，对照完整请求、响应、角色和思考字段。
 
-已经熟悉 Agent 基本概念的话，可以直接从 [ReActRunner.java](../src/main/java/dev/learning/agent/core/ReActRunner.java) 开始读，再根据调用关系返回文档。
+已经熟悉 Agent 基本概念的话，可以直接从 [ReActRunner.java](../src/main/java/dev/learning/agent/core/react/ReActRunner.java) 开始读，再根据调用关系返回文档。
 
 ## 开发设计与研究
 

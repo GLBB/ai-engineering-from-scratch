@@ -1,10 +1,14 @@
 package dev.learning.agent.app.chat;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.app.LocalRequest;
-import dev.learning.agent.core.*;
+import dev.learning.agent.core.AgentMode;
+import dev.learning.agent.core.CompletionCheck;
+import dev.learning.agent.core.ExecutionStatus;
+import dev.learning.agent.core.RunResult;
+import dev.learning.agent.model.ModelSettings;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.web.context.request.async.WebAsyncUtils;
-import dev.learning.agent.deepseek.model.ModelSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;

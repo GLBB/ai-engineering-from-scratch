@@ -22,7 +22,7 @@ mvn spring-boot:run
 1. 在页面输入“请使用计算器计算 `(120+18)/3`”。模型可能自行决定是否调用工具。
 2. 切到“轨迹”，先看用户输入和模型设置，再查看模型请求与工具行。
 3. 展开 `calculator` 工具行，查看参数和结果；再观察后续模型请求及最终回答。
-4. 对照 [ReActEngine.execute](../src/main/java/dev/learning/agent/core/DefaultReActEngine.java) 中的模型请求、工具执行和完整历史检查点。
+4. 对照 [ReActEngine.execute](../src/main/java/dev/learning/agent/core/react/DefaultReActEngine.java) 中的模型请求、工具执行和完整历史检查点。
 
 如果没有工具行，说明本轮没有观察到工具调用；可换一个问题重试。轨迹不是预先写好的演示。
 
@@ -40,8 +40,8 @@ mvn spring-boot:run
 | 想看什么 | 断点位置 | 观察内容 |
 | --- | --- | --- |
 | 浏览器提交了什么 | [ChatController.chat](../src/main/java/dev/learning/agent/app/chat/ChatController.java) | `body`、`settings`、会话是否存在。 |
-| 上下文和循环 | [DefaultReActEngine.execute](../src/main/java/dev/learning/agent/core/DefaultReActEngine.java) 的 `context.model().call` 前 | `messages`、当前轮次、工具定义。 |
-| 模型要求执行什么 | [DefaultToolExecutionService.attempt](../src/main/java/dev/learning/agent/core/DefaultToolExecutionService.java) 分发前 | 工具名称、参数和调用 ID。 |
+| 上下文和循环 | [DefaultReActEngine.execute](../src/main/java/dev/learning/agent/core/react/DefaultReActEngine.java) 的 `context.model().call` 前 | `messages`、当前轮次、工具定义。 |
+| 模型要求执行什么 | [DefaultToolExecutionService.attempt](../src/main/java/dev/learning/agent/tool/DefaultToolExecutionService.java) 分发前 | 工具名称、参数和调用 ID。 |
 | 工具如何处理参数 | [ToolRegistry.dispatch](../src/main/java/dev/learning/agent/tool/ToolRegistry.java) | 工具查找及返回结果。 |
 | 页面为什么收到确认请求 | [BrowserApproval](../src/main/java/dev/learning/agent/app/chat/BrowserApproval.java) 的 `request` | 确认 ID、类型，以及等待用户决定的过程。 |
 | 协议设置何时生效 | [SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) 和 [AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) 构造方法 | 已保存协议与启动时选择的客户端。 |
@@ -54,7 +54,7 @@ mvn spring-boot:run
 mvn test
 ```
 
-测试不要求调用真实模型。可从 [ReActRunnerTraceTest](../src/test/java/dev/learning/agent/core/ReActRunnerTraceTest.java) 看循环和轨迹，从 [ProtocolAdaptersTest](../src/test/java/dev/learning/agent/deepseek/ProtocolAdaptersTest.java) 看协议事件与工具结果回传，从 [SettingsStoreTest](../src/test/java/dev/learning/agent/app/settings/SettingsStoreTest.java) 看设置保存和重启生效。
+测试不要求调用真实模型。可从 [ReActRunnerTraceTest](../src/test/java/dev/learning/agent/core/react/ReActRunnerTraceTest.java) 看循环和轨迹，从 [ProtocolAdaptersTest](../src/test/java/dev/learning/agent/deepseek/ProtocolAdaptersTest.java) 看协议事件与工具结果回传，从 [SettingsStoreTest](../src/test/java/dev/learning/agent/app/settings/SettingsStoreTest.java) 看设置保存和重启生效。
 
 运行日志写入项目的 `logs/agent.log`：
 

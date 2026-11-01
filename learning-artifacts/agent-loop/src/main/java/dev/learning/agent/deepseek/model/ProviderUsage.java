@@ -1,5 +1,7 @@
 package dev.learning.agent.deepseek.model;
 
+import dev.learning.agent.model.TokenUsage;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -14,6 +16,17 @@ public record ProviderUsage(
         @JsonProperty("input_tokens_details") Details inputTokensDetails,
         @JsonProperty("output_tokens_details") Details outputTokensDetails,
         @JsonProperty("completion_tokens_details") Details completionTokensDetails) {
+    public static TokenUsage toTokenUsage(ProviderUsage usage) {
+        if (usage == null) return null;
+        Long input = usage.promptTokens() != null ? usage.promptTokens() : usage.inputTokens();
+        Long output = usage.completionTokens() != null ? usage.completionTokens() : usage.outputTokens();
+        Long cached = usage.promptCacheHitTokens() != null ? usage.promptCacheHitTokens() : usage.cacheReadInputTokens();
+        if (cached == null && usage.inputTokensDetails() != null) cached = usage.inputTokensDetails().cachedTokens();
+        Long reasoning = usage.completionTokensDetails() == null ? null : usage.completionTokensDetails().reasoningTokens();
+        if (reasoning == null && usage.outputTokensDetails() != null) reasoning = usage.outputTokensDetails().reasoningTokens();
+        return new TokenUsage(input, output, cached, reasoning);
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Details(@JsonProperty("cached_tokens") Long cachedTokens,
                           @JsonProperty("reasoning_tokens") Long reasoningTokens) {}

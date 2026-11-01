@@ -93,20 +93,20 @@ ChatModel 的三个实现继续负责 HTTP 报文与 SSE；新增 Gateway 将预
 | ModelRequest | 某一次发给模型的历史、工具和输出配置 | 一次模型请求 |
 | ToolResult / Evidence | 工具执行结果，以及该结果的编号和来源 | 当前 run；用于绑定、检查与轨迹 |
 
-以下签名集中展示，实施时每个 public 类型放入独立文件，类型路径见第 13 节。集合参数在构造时复制；返回快照不暴露内部可变集合。
+以下签名按阅读顺序集中展示，不属于同一个 Java 文件；每个 public 类型独立落盘，实际包归属见第 13 节。集合参数在构造时复制；返回快照不暴露内部可变集合。
 
 <details>
 <summary>展开共享 Java 接口与数据类型的完整签名</summary>
 
-<!-- contract: core -->
+<!-- contract: shared -->
 ```java
-package dev.learning.agent.core;
+// 跨包契约摘要；core、core.runtime、core.react、model、tool 的归属见第 13 节。
 
-import dev.learning.agent.deepseek.model.AssistantTurn;
-import dev.learning.agent.deepseek.model.ChatMessage;
-import dev.learning.agent.deepseek.model.ModelSettings;
-import dev.learning.agent.deepseek.model.ToolCall;
-import dev.learning.agent.deepseek.model.ToolSpec;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.ToolCall;
+import dev.learning.agent.model.ToolSpec;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -750,9 +750,9 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 | 文件或目录 | 操作 | 实施内容 |
 | --- | --- | --- |
 | core/AgentLoop.java | 拆分后删除旧单体 | 循环迁入 DefaultReActEngine，历史所有权迁入 ReActRunner；迁移引用后一次删除 |
-| core/ChatModel.java | 修改 | 统一 ModelRequest、RunControl、输出回调签名 |
-| core/ 下第 4 节公共类型 | 新增 | 每 public 类型独立文件；同名 Default 实现分别落文件 |
-| core/ReActRunner.java | 新增 | 对话历史、内核调用、合法检查点、RunResult |
+| model/ChatModel.java | 修改 | 统一 ModelRequest、RunControl、输出回调签名 |
+| core/ 与 core/runtime/ | 按职责分包 | 根包保留执行入口与结果；runtime 管 RunContext、预算、取消、证据和事件 |
+| core/react/ReActRunner.java | 新增 | 对话历史、内核调用、合法检查点、RunResult |
 | core/rewoo/ | 新增 | RewooRunner、Plan/Step/ValidatedPlan、Planner、Parser、Validator、Binder、Solver |
 | core/planexecute/ | 新增 | PlanExecuteRunner、GoalPlan/Step、StepResult、Ledger、Planner、Validator、StepExecutor、Replanner、四种 Decision、Finalizer |
 | app/chat/AgentSessions.java | 修改 | 单 runner、模式原子绑定、accept/execute/status、RunLease |
@@ -761,17 +761,20 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 | app/chat/BrowserApproval.java | 修改 | 实现 ApprovalGateway；绑定 requestId、超时受剩余时间限制 |
 | app/chat/ChatErrors.java / ApiFailure.java | 新增 | 稳定的 JSON 错误码与 body |
 | app/settings/ | 保留既有职责 | 不写入模式或本轮预算 |
-| tool/AgentTool.java / ToolRegistry.java | 修改 | typed ToolInput、结构化 ToolResult、参数解码与目录 |
+| tool/ | 按职责归集 | ToolInput/ToolResult、ToolInputDecoder、ToolRegistry 和 ToolExecutionService，与具体工具放在一起 |
+| support/json/StrictJson.java | 提取通用操作 | 严格对象/字段/字符串数组解析；不引用工具或算法类型 |
 | tool/ 三个具体工具 | 修改 | 状态、执行标记、取消；Bash 拒绝分享不外泄输出 |
 | deepseek/ 三客户端与 StreamingHttp | 修改 | 新 ModelRequest、取消 future/流、输出上限 |
 | deepseek/model/ChatRequest.java | 修改 | forModel、无工具字段省略、输出参数 |
-| deepseek/model/AssistantTurn / ChatChunk 等响应类型 | 修改 | 可空 usage，保留已有构造/测试所需语义 |
-| core/TraceEvent.java | 修改 | 作用域、实际错误状态和模型计数 |
+| model/ 与 deepseek/model/ | 分离共享契约和协议 DTO | AssistantTurn、ChatMessage、TokenUsage 等由各模式共用；ChatRequest、ChatChunk、ProviderUsage 保留在协议包 |
+| core/runtime/TraceEvent.java | 修改 | 作用域、实际错误状态和模型计数 |
 | static/index.html / app.css / app.js | 修改 | 对话框上方独立模式栏、新对话三选一与原位只读展示、计划卡、状态恢复 |
 | static/conversation-state.js | 新增 | 纯状态转换与事件归属检查 |
 | static/trace.js | 修改 | revision、步骤关联、按实际状态/计数展示 |
 | prompts/ 下 7 个文本文件 | 新增 | rewoo-planner、rewoo-solver、json-repair；goal-planner、step-executor、replanner、plan-finalizer，均以 .txt 结尾 |
 | README 与 docs/01–06 | 随实现更新 | 只描述已经实现并验收的行为 |
+
+当前包结构与依赖规则见[项目架构](../01-architecture.md#为什么这样分)。测试包跟随生产包；PackageStructureTest 保护算法、共享模型与 JSON 支持的边界。RunContext.trace 统一发送带作用域轨迹，工具服务不再借用 DefaultModelGateway 的静态事件方法。
 
 提示词资源位于 `src/main/resources/prompts/`，代码填充带标签的任务、工具和证据数据；明确角色、输出契约与规则，外部内容不获得执行授权。修复提示只处理格式，不假冒工具执行记录。
 

@@ -1,7 +1,7 @@
 package dev.learning.agent.tool;
 
-import dev.learning.agent.deepseek.model.ToolCall;
-import dev.learning.agent.deepseek.model.ToolCall.FunctionCall;
+import dev.learning.agent.model.ToolCall.FunctionCall;
+import dev.learning.agent.model.ToolCall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;

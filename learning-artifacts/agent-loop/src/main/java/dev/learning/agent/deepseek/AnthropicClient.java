@@ -1,23 +1,24 @@
 package dev.learning.agent.deepseek;
 
+import dev.learning.agent.core.runtime.RunControl;
+import dev.learning.agent.deepseek.model.ProviderUsage;
+import dev.learning.agent.model.AssistantBlock;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ChatModel;
+import dev.learning.agent.model.ModelRequest;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.ModelUse;
+import dev.learning.agent.model.OutputMode;
+import dev.learning.agent.model.TokenUsage;
+import dev.learning.agent.model.ToolCall;
+import dev.learning.agent.model.ToolSpec;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.ChatModel;
-import dev.learning.agent.deepseek.model.TokenUsage;
-import dev.learning.agent.deepseek.model.ProviderUsage;
-import dev.learning.agent.core.ModelRequest;
-import dev.learning.agent.core.RunControl;
-import dev.learning.agent.core.ModelUse;
-import dev.learning.agent.core.OutputMode;
-import dev.learning.agent.deepseek.model.AssistantBlock;
-import dev.learning.agent.deepseek.model.AssistantTurn;
-import dev.learning.agent.deepseek.model.ChatMessage;
-import dev.learning.agent.deepseek.model.ModelSettings;
-import dev.learning.agent.deepseek.model.ToolCall;
-import dev.learning.agent.deepseek.model.ToolSpec;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -126,7 +127,7 @@ public final class AnthropicClient implements ChatModel {
             switch (event.type()) {
                 case "message_start" -> {
                     MessageStart start = json.readValue(data, MessageStart.class);
-                    if (start.message() != null) usage[0] = TokenUsage.from(start.message().usage());
+                    if (start.message() != null) usage[0] = ProviderUsage.toTokenUsage(start.message().usage());
                 }
                 case "content_block_start" -> {
                     BlockStart start = json.readValue(data, BlockStart.class);
@@ -143,7 +144,7 @@ public final class AnthropicClient implements ChatModel {
                 }
                 case "message_delta" -> {
                     MessageDelta part = json.readValue(data, MessageDelta.class);
-                    usage[0] = TokenUsage.merge(usage[0], TokenUsage.from(part.usage()));
+                    usage[0] = TokenUsage.merge(usage[0], ProviderUsage.toTokenUsage(part.usage()));
                     if (part.delta() != null && part.delta().stopReason() != null) stopReason[0] = part.delta().stopReason();
                 }
                 case "message_stop" -> done[0] = true;

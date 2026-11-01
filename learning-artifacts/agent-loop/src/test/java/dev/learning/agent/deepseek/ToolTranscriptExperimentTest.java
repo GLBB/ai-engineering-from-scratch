@@ -1,14 +1,15 @@
 package dev.learning.agent.deepseek;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.deepseek.model.AssistantTurn;
-import dev.learning.agent.deepseek.model.ChatMessage;
 import dev.learning.agent.deepseek.model.ChatRequest;
-import dev.learning.agent.deepseek.model.ModelSettings;
-import dev.learning.agent.deepseek.model.ToolCall;
+import dev.learning.agent.model.AssistantTurn;
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.ToolCall;
 import dev.learning.agent.tool.CalculatorTool;
 import dev.learning.agent.tool.ToolRegistry;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 

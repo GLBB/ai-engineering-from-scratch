@@ -1,11 +1,15 @@
 package dev.learning.agent.deepseek.model;
 
+import dev.learning.agent.model.ChatMessage;
+import dev.learning.agent.model.ModelRequest;
+import dev.learning.agent.model.ModelSettings;
+import dev.learning.agent.model.OutputMode;
+import dev.learning.agent.model.ToolSpec;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
-import dev.learning.agent.core.ModelRequest;
-import dev.learning.agent.core.OutputMode;
 
 /**
  * DeepSeek Chat Completions 请求体。字段以官方文档为准；未设置的可选字段不会发出。

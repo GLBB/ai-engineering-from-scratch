@@ -1,18 +1,26 @@
 package dev.learning.agent.app.chat;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.app.settings.SettingsStore;
-import dev.learning.agent.core.*;
+import dev.learning.agent.core.AgentMode;
+import dev.learning.agent.core.AgentRunner;
+import dev.learning.agent.core.ExecutionRequest;
+import dev.learning.agent.core.RunResult;
+import dev.learning.agent.core.planexecute.PlanExecuteRunner;
+import dev.learning.agent.core.react.DefaultReActEngine;
+import dev.learning.agent.core.react.ReActRunner;
+import dev.learning.agent.core.rewoo.RewooRunner;
+import dev.learning.agent.deepseek.AnthropicClient;
 import dev.learning.agent.deepseek.ChatCompletionsClient;
 import dev.learning.agent.deepseek.ResponsesClient;
-import dev.learning.agent.deepseek.AnthropicClient;
-import dev.learning.agent.core.ChatModel;
-import dev.learning.agent.deepseek.model.ModelSettings;
+import dev.learning.agent.model.ChatModel;
+import dev.learning.agent.model.ModelSettings;
 import dev.learning.agent.tool.BashTool;
 import dev.learning.agent.tool.CalculatorTool;
 import dev.learning.agent.tool.SearchTool;
 import dev.learning.agent.tool.ToolRegistry;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
@@ -83,8 +91,8 @@ final class AgentSessions {
             if (mode != null && mode != selected) throw new ApiFailure(409, "MODE_LOCKED", "Start a new conversation to change mode.");
             AgentRunner candidate = runner != null ? runner : switch (selected) {
                 case REACT -> new ReActRunner(new DefaultReActEngine(tools));
-                case REWOO -> new dev.learning.agent.core.rewoo.RewooRunner(tools);
-                case PLAN_EXECUTE -> new dev.learning.agent.core.planexecute.PlanExecuteRunner(tools, new DefaultReActEngine(tools));
+                case REWOO -> new RewooRunner(tools);
+                case PLAN_EXECUTE -> new PlanExecuteRunner(tools, new DefaultReActEngine(tools));
             };
             var request = new ExecutionRequest(UUID.randomUUID(), prompt, settings);
             RunLease lease = new RunLease(request, selected, candidate, client, tools, this::release);

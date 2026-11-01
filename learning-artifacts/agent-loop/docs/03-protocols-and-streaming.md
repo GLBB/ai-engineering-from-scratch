@@ -6,7 +6,7 @@
 
 ## 为什么有三个客户端
 
-[ChatModel](../src/main/java/dev/learning/agent/core/ChatModel.java) 是 Agent 循环使用的接口：传入历史消息、工具定义、文本回调和模型设置，返回一次完整的 `AssistantTurn`。三个客户端都实现这个接口：
+[ChatModel](../src/main/java/dev/learning/agent/model/ChatModel.java) 是 Agent 循环使用的接口：传入历史消息、工具定义、文本回调和模型设置，返回一次完整的 `AssistantTurn`。三个客户端都实现这个接口：
 
 | 页面中的选项 | 客户端 | DeepSeek 路径 | 适配重点 |
 | --- | --- | --- | --- |
@@ -14,11 +14,11 @@
 | Responses | [ResponsesClient](../src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | `/responses` | `input` 中的消息、`function_call`、`function_call_output` 和语义化流事件。 |
 | Anthropic Messages | [AnthropicClient](../src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | `/anthropic/v1/messages` | 有顺序的内容块，`tool_use`、`tool_result` 和 thinking 内容。 |
 
-[ReActRunner](../src/main/java/dev/learning/agent/core/ReActRunner.java) 处理统一后的回答、工具调用和结束原因；具体请求和响应的差别由客户端处理。DeepSeek 的 Responses 接口是无状态的，每次请求都需要携带完整历史。
+[ReActRunner](../src/main/java/dev/learning/agent/core/react/ReActRunner.java) 处理统一后的回答、工具调用和结束原因；具体请求和响应的差别由客户端处理。DeepSeek 的 Responses 接口是无状态的，每次请求都需要携带完整历史。
 
 ## 模型和推理等级怎么传
 
-输入框选择的模型和等级由 [ModelSettings](../src/main/java/dev/learning/agent/deepseek/model/ModelSettings.java) 校验。等级统一为 `off`、`low`、`high`、`max`，每次发送消息时生效。三个协议对应的请求字段不同：
+输入框选择的模型和等级由 [ModelSettings](../src/main/java/dev/learning/agent/model/ModelSettings.java) 校验。等级统一为 `off`、`low`、`high`、`max`，每次发送消息时生效。三个协议对应的请求字段不同：
 
 | 等级 | Chat Completions | Responses | Anthropic Messages |
 | --- | --- | --- | --- |
@@ -57,7 +57,7 @@ flowchart LR
 
 ## 轨迹从哪里来
 
-[TraceEvent](../src/main/java/dev/learning/agent/core/TraceEvent.java) 描述用户输入、模型设置、模型请求、思考、工具和助手消息等事件。`DefaultModelGateway` 与 `DefaultToolExecutionService` 在模型请求和工具执行开始、结束或失败时发出事件；开始和结束事件使用相同 ID，页面据此更新对应项的状态和耗时。
+[TraceEvent](../src/main/java/dev/learning/agent/core/runtime/TraceEvent.java) 描述用户输入、模型设置、模型请求、思考、工具和助手消息等事件。`DefaultModelGateway` 与 `DefaultToolExecutionService` 在模型请求和工具执行开始、结束或失败时发出事件；开始和结束事件使用相同 ID，页面据此更新对应项的状态和耗时。
 
 [trace.js](../src/main/resources/static/trace.js) 保存当前页面的事件，绘制时间线和可展开的列表。它展示应用实际收到和记录的内容；是否出现工具调用或思考内容，取决于本次模型响应。
 
