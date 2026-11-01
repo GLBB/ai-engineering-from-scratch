@@ -1,115 +1,72 @@
 package dev.learning.agent.app.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.learning.agent.core.TraceEvent;
-import dev.learning.agent.deepseek.model.ModelSettings;
+import dev.learning.agent.core.*;
+import dev.learning.agent.deepseek.model.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import java.nio.file.Path;
+import java.util.List;
 import static org.hamcrest.Matchers.containsString;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class ChatControllerTest {
-    @Test
-    void chatStreamsTextAndCompletionAsSeparateEvents() throws Exception {
-        AgentSessions sessions = mock(AgentSessions.class);
-        AgentSessions.Session session = mock(AgentSessions.Session.class);
-        when(sessions.get("test-session")).thenReturn(session);
-        when(session.begin()).thenReturn(true);
-        doAnswer(call -> {
-            ModelSettings settings = call.getArgument(1);
-            assertEquals(new ModelSettings("deepseek-v4-pro", "max"), settings);
-            EventSink sink = call.getArgument(2);
-            sink.emit("trace", TraceEvent.user("user-1", "hi", 123));
-            sink.emit("text", "hello");
-            return null;
-        }).when(session).run(eq("hi"), any(), any());
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new ChatController(sessions, new ObjectMapper())).build();
-
-        MvcResult started = mvc.perform(post("/api/chat")
-                .with(request -> {
-                    request.setServerName("127.0.0.1");
-                    request.setServerPort(8080);
-                    return request;
-                })
-                .header("Origin", "http://127.0.0.1:8080")
-                .header("X-Agent-Session", "test-session")
-                .contentType("application/json")
-                .content("{\"prompt\":\"hi\",\"model\":\"deepseek-v4-pro\","
-                        + "\"reasoningLevel\":\"max\"}"))
-                .andExpect(request().asyncStarted())
-                .andReturn();
-
-        mvc.perform(asyncDispatch(started))
-                .andExpect(status().isOk())
-                .andExpect(content().string(containsString("\"type\":\"trace\"")))
-                .andExpect(content().string(containsString("\"kind\":\"user\"")))
-                .andExpect(content().string(containsString("{\"type\":\"text\",\"data\":\"hello\"}\n")))
-                .andExpect(content().string(containsString("{\"type\":\"done\",\"data\":\"\"}\n")));
+    private final AgentSessions sessions = new AgentSessions((request, text, control) -> {
+        assertEquals(new ModelSettings("deepseek-v4-pro", "max"), request.settings());
+        text.accept("hello"); return new AssistantTurn("hello", List.of(), "stop");
+    }, Path.of("."), null);
+    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new ChatController(sessions, new ObjectMapper()))
+            .setControllerAdvice(new ChatErrors()).build();
+    private MockHttpServletRequestBuilder local(MockHttpServletRequestBuilder request) {
+        return request.with(r -> { r.setServerName("127.0.0.1"); r.setServerPort(8080); return r; })
+                .header("Origin", "http://127.0.0.1:8080");
     }
-
-    @Test
-    void emptyPromptGetsBadRequestInsteadOfStartingAgent() throws Exception {
-        AgentSessions sessions = mock(AgentSessions.class);
-        AgentSessions.Session session = mock(AgentSessions.Session.class);
-        when(sessions.get("test-session")).thenReturn(session);
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new ChatController(sessions, new ObjectMapper())).build();
-
-        mvc.perform(post("/api/chat")
-                .with(request -> {
-                    request.setServerName("127.0.0.1");
-                    request.setServerPort(8080);
-                    return request;
-                })
-                .header("Origin", "http://127.0.0.1:8080")
-                .header("X-Agent-Session", "test-session")
-                .contentType("application/json")
-                .content("{\"prompt\":\"\"}"))
-                .andExpect(status().isBadRequest());
+    private MockHttpServletRequestBuilder chat(String session, String body) {
+        return local(post("/api/chat")).header("X-Agent-Session", session).contentType("application/json").content(body);
     }
-
-    @Test
-    void unsupportedModelGetsBadRequest() throws Exception {
-        AgentSessions sessions = mock(AgentSessions.class);
-        when(sessions.get("test-session")).thenReturn(mock(AgentSessions.Session.class));
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(new ChatController(sessions, new ObjectMapper())).build();
-
-        mvc.perform(post("/api/chat")
-                .with(request -> {
-                    request.setServerName("127.0.0.1");
-                    request.setServerPort(8080);
-                    return request;
-                })
-                .header("Origin", "http://127.0.0.1:8080")
-                .header("X-Agent-Session", "test-session")
-                .contentType("application/json")
-                .content("{\"prompt\":\"hi\",\"model\":\"unknown\","
-                        + "\"reasoningLevel\":\"max\"}"))
-                .andExpect(status().isBadRequest());
+    @Test void chatStreamsRequestIdentityAndResultBeforeDone() throws Exception {
+        AgentSessions.Session session = sessions.create();
+        MvcResult started = mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"model\":\"deepseek-v4-pro\",\"reasoningLevel\":\"max\"}"))
+                .andExpect(request().asyncStarted()).andReturn();
+        String output = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertTrue(output.contains("\"type\":\"text\",\"data\":\"hello\""));
+        assertTrue(output.contains("\"type\":\"run_started\""));
+        assertTrue(output.indexOf("\"type\":\"run_result\"") < output.indexOf("\"type\":\"done\""));
+        for (String line : output.split("\n")) assertFalse(new ObjectMapper().readTree(line).path("requestId").asText().isBlank());
+        assertFalse(session.status().running()); assertTrue(session.status().modeLocked());
     }
-
-    @Test
-    void foreignOriginCannotApproveBash() throws Exception {
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(
-                new ChatController(mock(AgentSessions.class), new ObjectMapper())).build();
-
-        mvc.perform(post("/api/approve")
-                .header("Origin", "http://other.example")
-                .header("X-Agent-Session", "test-session")
-                .contentType("application/json")
+    @Test void invalidRequestsDoNotBindModeAndHaveJsonErrors() throws Exception {
+        AgentSessions.Session session = sessions.create();
+        for (String body : List.of("{\"prompt\":\"\"}", "{\"prompt\":\"hi\",\"mode\":\"UNKNOWN\"}", "{\"prompt\":\"hi\",\"model\":\"unknown\"}")) {
+            mvc.perform(chat(session.id(), body)).andExpect(status().isBadRequest())
+                    .andExpect(content().string(containsString("INVALID_REQUEST")));
+            assertFalse(session.status().modeLocked());
+        }
+    }
+    @Test void statusDoesNotCreateMissingConversation() throws Exception {
+        mvc.perform(local(get("/api/session/status")).header("X-Agent-Session", "missing"))
+                .andExpect(status().isUnauthorized()).andExpect(content().string(containsString("SESSION_NOT_FOUND")));
+        AgentSessions.Session session = sessions.create();
+        mvc.perform(local(get("/api/session/status")).header("X-Agent-Session", session.id()))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("\"modeLocked\":false")));
+    }
+    @Test void concurrentAndModeConflictHaveSeparateCodes() throws Exception {
+        AgentSessions.Session session = sessions.create();
+        RunLease lease = session.accept("hi", ModelSettings.defaults(), AgentMode.REWOO);
+        mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REWOO\"}"))
+                .andExpect(status().isConflict()).andExpect(content().string(containsString("RUN_IN_PROGRESS")));
+        lease.cancel("test accepted cancellation");
+        mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REACT\"}"))
+                .andExpect(status().isConflict()).andExpect(content().string(containsString("MODE_LOCKED")));
+    }
+    @Test void foreignOriginCannotApproveBash() throws Exception {
+        mvc.perform(post("/api/approve").header("Origin", "http://other.example").contentType("application/json")
                 .content("{\"id\":\"approval\",\"approved\":true}"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden()).andExpect(content().string(containsString("FORBIDDEN_ORIGIN")));
     }
 }

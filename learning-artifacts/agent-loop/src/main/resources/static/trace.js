@@ -10,6 +10,7 @@ const traceView = (() => {
   const stepsByTurn = new Map();
   const turnTimes = new Map();
   const openSteps = new Set();
+  const results = new Map();
 
   function formatDuration(milliseconds) {
     if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
@@ -42,7 +43,8 @@ const traceView = (() => {
   function record(turnNumber, event) {
     const steps = stepsByTurn.get(turnNumber);
     if (!steps) return;
-    steps.set(event.id, { ...steps.get(event.id), ...event });
+    const label = event.phase ? `${event.phase}${event.stepId ? ' / ' + event.stepId : ''} · ${event.label}` : event.label;
+    steps.set(event.id, { ...steps.get(event.id), ...event, label });
     render();
   }
 
@@ -64,17 +66,22 @@ const traceView = (() => {
     let totalDuration = 0;
     let modelCount = 0;
     let toolCount = 0;
+    let toolsExecuted = 0;
     for (const [turnNumber, steps] of stepsByTurn) {
       const timing = turnTimes.get(turnNumber);
       totalDuration += timing.finished ? timing.duration : performance.now() - timing.started;
       for (const step of steps.values()) {
         if (step.kind === 'model') modelCount++;
-        if (step.kind === 'tool') toolCount++;
+        if (step.kind === 'tool' && !results.has(turnNumber)) toolCount++;
+      }
+      if (results.has(turnNumber)) {
+        toolCount += results.get(turnNumber).counters.toolAttempts;
+        toolsExecuted += results.get(turnNumber).counters.toolsExecuted;
       }
     }
     durationLabel.textContent = `时长 ${formatDuration(totalDuration)}`;
     roundsLabel.textContent = `模型轮次 ${modelCount}`;
-    toolsLabel.textContent = `工具调用 ${toolCount}`;
+    toolsLabel.textContent = `工具尝试 ${toolCount} · 实际执行 ${toolsExecuted}`;
   }
 
   function renderTimelines() {
@@ -182,6 +189,7 @@ const traceView = (() => {
     details.className = 'trace-detail';
     if (step.input) details.append(detailBlock('输入 / 参数', step.input));
     if (step.output) details.append(detailBlock('输出 / 结果', step.output));
+    if (step.usage) details.append(detailBlock('Token 用量（缺失字段为 unknown）', JSON.stringify(step.usage, null, 2)));
     if (!step.output && step.status === 'running') {
       details.append(detailBlock('状态', '执行中…'));
     }
@@ -232,5 +240,9 @@ const traceView = (() => {
     }
   }, 500);
 
-  return { show, beginTurn, finishTurn, record, recordError };
+  function reset() {
+    stepsByTurn.clear(); turnTimes.clear(); openSteps.clear(); results.clear(); searchInput.value = ''; render();
+  }
+  function result(turnNumber, data) { results.set(turnNumber, data); render(); }
+  return { show, beginTurn, finishTurn, record, recordError, reset, result };
 })();

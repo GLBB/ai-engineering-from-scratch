@@ -667,3 +667,18 @@ textarea::placeholder {
     display: none;
   }
 }
+
+.mode-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px clamp(18px, 4vw, 48px); background: #fff; border-bottom: 1px solid #e7eaee; }
+.mode-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px; }
+.mode-setting select, #new-conversation { border: 1px solid #dce2e4; border-radius: 8px; padding: 7px 10px; background: #fff; color: inherit; font: inherit; }
+#mode-hint { color: #76808c; font-size: 12px; }
+#new-conversation { white-space: nowrap; cursor: pointer; font-size: 13px; }
+#new-conversation:disabled { opacity: .5; cursor: default; }
+.phase-status { color: #167a68; font-size: 12px; margin: 0 0 12px; }
+.plan-card { border: 1px solid #dce2e4; border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; font-size: 13px; background: #fafcfb; }
+.plan-card summary { cursor: pointer; font-weight: 600; }
+.plan-step { padding-top: 12px; }
+.plan-step strong { display: inline-block; margin-right: 12px; }
+.plan-status { color: #167a68; font-size: 12px; }
+.plan-step pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #65707c; font: inherit; font-size: 12px; }
+@media (max-width: 600px) { .mode-bar { align-items: flex-start; } #mode-hint { flex-basis: 100%; } }

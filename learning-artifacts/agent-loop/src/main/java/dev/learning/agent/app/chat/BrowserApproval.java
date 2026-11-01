@@ -1,5 +1,8 @@
 package dev.learning.agent.app.chat;
 
+import dev.learning.agent.core.RunControl;
+import dev.learning.agent.core.RunScope;
+
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -23,11 +26,17 @@ final class BrowserApproval {
     }
 
     private boolean request(String kind, String content) {
+        return request(kind, content, null, null);
+    }
+
+    boolean request(String kind, String content, RunScope scope, RunControl control) {
         Pending request = new Pending(UUID.randomUUID().toString(), new CompletableFuture<>());
         if (!pending.compareAndSet(null, request)) return false;
+        AutoCloseable registration = control == null ? () -> {} : control.onCancel(() -> request.decision().complete(false));
         try {
-            sink.emit("approval", new ApprovalEvent(request.id(), kind, content));
-            return request.decision().get(5, TimeUnit.MINUTES);
+            if (control != null) control.check();
+            sink.emit("approval", new ApprovalEvent(request.id(), kind, content, scope == null ? null : scope.stepId()));
+            return request.decision().get(control == null ? 300_000 : Math.min(300_000, control.remaining().toMillis()), TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -35,6 +44,7 @@ final class BrowserApproval {
             return false;
         } finally {
             pending.compareAndSet(request, null);
+            try { registration.close(); } catch (Exception ignored) { /* Unregister only. */ }
         }
     }
 
@@ -50,6 +60,6 @@ final class BrowserApproval {
         }
     }
 
-    record ApprovalEvent(String id, String kind, String content) {}
+    record ApprovalEvent(String id, String kind, String content, String stepId) {}
     private record Pending(String id, CompletableFuture<Boolean> decision) {}
 }

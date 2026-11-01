@@ -17,8 +17,19 @@ const protocolNames = {
   ANTHROPIC: 'Anthropic Messages',
 };
 
+const modeSelect = document.querySelector('#mode-select');
+const currentMode = document.querySelector('#current-mode');
+const modeHint = document.querySelector('#mode-hint');
+const newConversation = document.querySelector('#new-conversation');
+const statusNames = { COMPLETE: '已完成', PARTIAL: '部分完成', FAILED: '失败', CANCELLED: '已取消', SUCCESS: '成功', ERROR: '失败', DENIED: '已拒绝', TIMEOUT: '已超时', SKIPPED: '已跳过', INCOMPLETE: '未完成' };
+const phaseNames = { PLAN: '规划中', WORK: '执行工具', EXECUTE: '执行步骤', REPLAN: '检查下一步', REPAIR: '修复计划格式', SOLVE: '汇总回答', FINALIZE: '汇总回答' };
+const modeNames = { REACT: 'ReAct', REWOO: 'ReWOO', PLAN_EXECUTE: 'Plan-and-Execute' };
+let preferredMode = 'REACT';
+try { preferredMode = localStorage.getItem('agent-mode') || preferredMode; } catch (_) { /* Storage may be disabled. */ }
+let state = conversationState.create(preferredMode);
 let sessionId;
-let running = false;
+let pending = false;
+let statusTimer;
 let conversationTurn = 0;
 
 function showProtocolStatus(settings) {
@@ -67,6 +78,14 @@ function setInputDisabled(disabled) {
   sendButton.disabled = disabled;
   modelSelect.disabled = disabled;
   effortSelect.disabled = disabled;
+  modeSelect.disabled = disabled;
+  newConversation.disabled = pending || state.running;
+  modeSelect.value = state.mode;
+  modeSelect.hidden = state.modeLocked;
+  document.querySelector('#mode-label').hidden = state.modeLocked;
+  currentMode.hidden = !state.modeLocked;
+  currentMode.textContent = `执行模式：${modeNames[state.mode]}`;
+  modeHint.textContent = state.modeLocked ? '本对话模式已固定，新建对话可切换。' : '首条消息发送后固定，可新建对话切换。';
 }
 
 function scrollToLatest() {
@@ -107,6 +126,7 @@ function addNote(parent, content, isError = false) {
 }
 
 async function showApproval(parent, approval) {
+  const approvalSession = sessionId;
   const card = document.createElement('div');
   card.className = 'approval';
   const title = document.createElement('div');
@@ -138,7 +158,7 @@ async function showApproval(parent, approval) {
     try {
       const response = await fetch('/api/approve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Agent-Session': sessionId },
+        headers: { 'Content-Type': 'application/json', 'X-Agent-Session': approvalSession },
         body: JSON.stringify({ id: approval.id, approved }),
       });
       if (!response.ok) throw new Error('确认已过期');
@@ -173,20 +193,50 @@ async function sendPrompt(prompt, settings) {
   const turnNumber = ++conversationTurn;
   traceView.beginTurn(turnNumber);
   traceView.show('conversation');
-  running = true;
+  pending = true;
+  const requestSession = sessionId;
   setInputDisabled(true);
   addMessage('user', prompt);
   const answer = addMessage('assistant');
   let finished = false;
+  const plans = new Map();
+  const phase = document.createElement('div');
+  phase.className = 'phase-status';
+  answer.body.prepend(phase);
 
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Agent-Session': sessionId },
-      body: JSON.stringify({ prompt, ...settings }),
+      headers: { 'Content-Type': 'application/json', 'X-Agent-Session': requestSession },
+      body: JSON.stringify({ prompt, mode: state.mode, ...settings }),
     });
-    if (!response.ok) throw new Error(`请求失败：HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`${error.code || response.status}：${error.message || '请求失败'}`);
+    }
     await readEvents(response, event => {
+      if (requestSession !== sessionId) return;
+      if (event.type === 'run_started') {
+        state = conversationState.started(state, event.data);
+        try { localStorage.setItem('agent-mode', state.mode); } catch (_) { /* Optional preference. */ }
+        setInputDisabled(true);
+      }
+      if (state.activeRequestId && event.requestId !== state.activeRequestId) return;
+      if (event.type === 'phase') phase.textContent = `${phaseNames[event.data.phase] || event.data.phase}${event.data.stepId ? ' · ' + event.data.stepId : ''} · 执行中`;
+      if (event.type === 'plan') showPlan(answer.body, event.data, plans);
+      if (event.type === 'evidence') {
+        const row = plans.get(event.data.stepId || event.data.id);
+        if (row) row.status.textContent = statusNames[event.data.result.status] || event.data.result.status;
+      }
+      if (event.type === 'step_result') {
+        const row = plans.get(event.data.stepId);
+        if (row) { row.status.textContent = statusNames[event.data.status] || event.data.status; row.detail.textContent += '\n结果：' + event.data.summary; }
+      }
+      if (event.type === 'decision') addNote(answer.body, `计划检查：${event.data.reason}`);
+      if (event.type === 'run_result') {
+        phase.textContent = `${statusNames[event.data.status] || event.data.status} · ${event.data.completionCheck === 'UNVERIFIED' ? '结果尚未做语义校验' : event.data.completionCheck}`;
+        traceView.result(turnNumber, event.data);
+      }
       if (event.type === 'text') answer.text.textContent += event.data;
       if (event.type === 'tool') addNote(answer.body, event.data);
       if (event.type === 'trace') traceView.record(turnNumber, event.data);
@@ -195,8 +245,9 @@ async function sendPrompt(prompt, settings) {
         showApproval(answer.body, event.data);
       }
       if (event.type === 'error') {
-        addNote(answer.body, event.data, true);
-        traceView.recordError(turnNumber, event.data);
+        const message = typeof event.data === 'string' ? event.data : `${event.data.code}：${event.data.message}`;
+        addNote(answer.body, message, true);
+        traceView.recordError(turnNumber, message);
         finished = true;
       }
       if (event.type === 'done') finished = true;
@@ -212,16 +263,17 @@ async function sendPrompt(prompt, settings) {
     traceView.recordError(turnNumber, error.message);
   } finally {
     traceView.finishTurn(turnNumber);
-    running = false;
-    setInputDisabled(false);
-    promptInput.focus();
+    pending = false;
+    await refreshStatus();
+    setInputDisabled(!sessionId || state.running);
+    if (!state.running) promptInput.focus();
   }
 }
 
 form.addEventListener('submit', event => {
   event.preventDefault();
   const prompt = promptInput.value.trim();
-  if (!sessionId || running || !prompt) return;
+  if (!sessionId || pending || state.running || !prompt) return;
   const settings = {
     model: modelSelect.value,
     reasoningLevel: effortSelect.value,
@@ -237,18 +289,84 @@ promptInput.addEventListener('keydown', event => {
   }
 });
 
-fetch('/api/session')
-  .then(async response => {
+function showPlan(parent, data, rows) {
+  const activeIds = new Set(data.plan.steps.map(step => step.id));
+  for (const [id, row] of rows) if (!activeIds.has(id) && row.status.textContent === '等待执行') row.status.textContent = '已被新计划替换';
+  for (const old of parent.querySelectorAll('.plan-card')) old.dataset.historical = 'true';
+  const card = document.createElement('details');
+  card.className = 'plan-card';
+  card.open = true;
+  const heading = document.createElement('summary');
+  heading.textContent = `${modeNames[data.mode]} · 计划 v${data.revision + 1}`;
+  card.append(heading);
+  for (const step of data.plan.steps) {
+    const row = document.createElement('div');
+    row.className = 'plan-step';
+    const label = document.createElement('strong');
+    label.textContent = `${step.id} · ${step.goal || step.purpose}`;
+    const status = document.createElement('span');
+    status.className = 'plan-status';
+    // Successful retained steps keep their known state in the new revision.
+    status.textContent = rows.get(step.id)?.status.textContent || '等待执行';
+    const detail = document.createElement('pre');
+    detail.textContent = step.tool ? `${step.tool} ${JSON.stringify(step.arguments)}\n依赖：${[...new Set((Object.values(step.arguments).join(' ').match(/#E[1-9][0-9]*/g) || []))].join(', ') || '无'}`
+      : `验收：${step.successCriteria}\n最少证据：${step.minEvidence} · 工具：${step.allowedTools.join(', ') || '无'}\n依赖：${step.dependsOn.join(', ') || '无'}`;
+    row.append(label, status, detail);
+    card.append(row);
+    rows.set(step.id, { status, detail });
+  }
+  parent.insertBefore(card, parent.querySelector('.message-text'));
+}
+
+async function refreshStatus() {
+  clearTimeout(statusTimer);
+  if (!sessionId) return;
+  try {
+    const response = await fetch('/api/session/status', { headers: { 'X-Agent-Session': sessionId } });
+    if (response.status === 401) {
+      sessionId = null;
+      state = conversationState.create(state.mode);
+      connectionStatus.textContent = '会话已失效，请新建对话';
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  })
-  .then(data => {
+    state = conversationState.status(state, await response.json());
+    connectionStatus.textContent = state.running ? '正在结束上一轮…' : '已连接';
+  } catch (_) {
+    // A lost response does not establish whether acceptance occurred.
+    state = { ...state, running: true };
+    connectionStatus.textContent = '连接状态未知，正在核对…';
+  } finally {
+    setInputDisabled(!sessionId || pending || state.running);
+    if (state.running && !pending) statusTimer = setTimeout(refreshStatus, 1500);
+  }
+}
+
+async function createConversation() {
+  if (pending || state.running) return;
+  pending = true;
+  setInputDisabled(true);
+  try {
+    const response = await fetch('/api/session');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
     sessionId = data.sessionId;
+    state = conversationState.status(conversationState.create(state.mode), data);
+    conversation.replaceChildren(welcome);
+    traceView.reset();
+    conversationTurn = 0;
     connectionStatus.textContent = '已连接';
-    setInputDisabled(false);
-    promptInput.focus();
-  })
-  .catch(error => {
+    promptInput.value = '';
+    traceView.show('conversation');
+  } catch (error) {
     connectionStatus.textContent = '连接失败';
     addNote(conversation, `无法创建会话：${error.message}`, true);
-  });
+  } finally {
+    pending = false;
+    setInputDisabled(!sessionId || state.running);
+    if (sessionId) promptInput.focus();
+  }
+}
+modeSelect.addEventListener('change', () => { state = conversationState.select(state, modeSelect.value); });
+newConversation.addEventListener('click', createConversation);
+createConversation();

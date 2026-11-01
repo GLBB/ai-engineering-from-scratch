@@ -2,6 +2,8 @@ package dev.learning.agent.app.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.app.LocalRequest;
+import dev.learning.agent.core.*;
+import org.springframework.web.context.request.async.WebAsyncUtils;
 import dev.learning.agent.deepseek.model.ModelSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -32,25 +34,33 @@ final class ChatController {
     @GetMapping("/api/session")
     ResponseEntity<?> session(HttpServletRequest request) {
         if (!LocalRequest.isLocalHost(request)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            throw new ApiFailure(403, "FORBIDDEN_ORIGIN", "Only local same-origin requests are allowed.");
         }
         AgentSessions.Session session = sessions.create();
-        return ResponseEntity.ok().header("Cache-Control", "no-store").body(new Ready(session.id()));
+        return ResponseEntity.ok().header("Cache-Control", "no-store").body(session.status());
+    }
+
+    @GetMapping("/api/session/status")
+    ResponseEntity<?> status(HttpServletRequest request) {
+        if (!LocalRequest.isLocalHost(request)) throw new ApiFailure(403, "FORBIDDEN_ORIGIN", "Only local requests are allowed.");
+        AgentSessions.Session session = existing(request);
+        if (session == null) throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
+        return ResponseEntity.ok().header("Cache-Control", "no-store").body(session.status());
     }
 
     @PostMapping(path = "/api/chat", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<StreamingResponseBody> chat(@RequestBody Prompt body, HttpServletRequest request) {
         if (!LocalRequest.hasSameOrigin(request)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            throw new ApiFailure(403, "FORBIDDEN_ORIGIN", "Only local same-origin requests are allowed.");
         }
         AgentSessions.Session session = existing(request);
         if (session == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
         }
         boolean invalidPrompt = body.prompt() == null || body.prompt().isBlank()
                 || body.prompt().length() > 10_000;
         if (invalidPrompt) {
-            return ResponseEntity.badRequest().build();
+            throw new ApiFailure(400, "INVALID_REQUEST", "Invalid prompt, model or reasoning level.");
         }
         ModelSettings settings;
         try {
@@ -58,16 +68,15 @@ final class ChatController {
             String level = body.reasoningLevel() == null ? "off" : body.reasoningLevel();
             settings = new ModelSettings(model, level);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
+            throw new ApiFailure(400, "INVALID_REQUEST", "Invalid prompt, model or reasoning level.");
         }
-        if (!session.begin()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
-        }
+        RunLease lease = session.accept(body.prompt(), settings, body.mode());
+        WebAsyncUtils.getAsyncManager(request).registerCallableInterceptor(lease.requestId(), new AgentRunInterceptor(lease));
 
         StreamingResponseBody stream = output -> {
             EventSink sink = (type, data) -> {
                 try {
-                    byte[] line = (json.writeValueAsString(new ChatEvent(type, data)) + "\n")
+                    byte[] line = (json.writeValueAsString(new ChatEvent(lease.requestId(), type, data)) + "\n")
                             .getBytes(StandardCharsets.UTF_8);
                     output.write(line);
                     output.flush();
@@ -76,12 +85,18 @@ final class ChatController {
                 }
             };
             try {
-                session.run(body.prompt(), settings, sink);
-                sink.emit("done", "");
+                RunResult result = session.execute(lease, sink);
+                if (result == null) return;
+                sink.emit("run_result", result);
+                if (result.status() == ExecutionStatus.COMPLETE || result.status() == ExecutionStatus.PARTIAL) sink.emit("done", "");
+                else sink.emit("error", new ChatErrors.ApiError(result.errorCode() == null ? "INCOMPLETE_RUN" : result.errorCode(), "Run did not complete."));
             } catch (Exception e) {
+                lease.cancel("stream or execution failed");
                 String message = e.getMessage() == null ? "Agent failed." : e.getMessage();
                 try {
-                    sink.emit("error", message);
+                    ExecutionStatus status = (e instanceof InterruptedException || lease.context().control().cancelled()) ? ExecutionStatus.CANCELLED : ExecutionStatus.FAILED;
+                    sink.emit("run_result", new RunResult(status, CompletionCheck.UNVERIFIED, "", "EXECUTION_ERROR", lease.context().budget().snapshot()));
+                    sink.emit("error", new ChatErrors.ApiError("EXECUTION_ERROR", message));
                 } catch (UncheckedIOException ignored) {
                     // The browser has already disconnected.
                 }
@@ -95,14 +110,14 @@ final class ChatController {
     @PostMapping(path = "/api/approve", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<?> approve(@RequestBody Decision body, HttpServletRequest request) {
         if (!LocalRequest.hasSameOrigin(request)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            throw new ApiFailure(403, "FORBIDDEN_ORIGIN", "Only local same-origin requests are allowed.");
         }
         AgentSessions.Session session = existing(request);
         if (session == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
         }
         if (body.id() == null || !session.decide(body.id(), body.approved())) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorMessage("Approval expired."));
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ChatErrors.ApiError("APPROVAL_EXPIRED", "Approval expired."));
         }
         return ResponseEntity.ok().build();
     }
@@ -111,9 +126,8 @@ final class ChatController {
         return sessions.get(request.getHeader(SESSION_HEADER));
     }
 
-    record Prompt(String prompt, String model, String reasoningLevel) {}
+    record Prompt(String prompt, String model, String reasoningLevel, AgentMode mode) {}
     record Decision(String id, boolean approved) {}
-    record ChatEvent(String type, Object data) {}
-    record ErrorMessage(String error) {}
-    record Ready(String sessionId) {}
+    record ChatEvent(java.util.UUID requestId, String type, Object data) {}
+
 }

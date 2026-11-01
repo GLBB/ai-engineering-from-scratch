@@ -19,10 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
-/** Keeps one in-memory AgentLoop and approval state per browser session. */
+/** Each conversation owns one fixed-mode runner and at most one active request. */
 @Service
 final class AgentSessions {
     private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
@@ -31,6 +29,7 @@ final class AgentSessions {
     private final Path projectRoot;
     private final String exaKey;
 
+    @org.springframework.beans.factory.annotation.Autowired
     AgentSessions(SettingsStore settings) {
         String key = System.getenv("DEEPSEEK_API_KEY");
         if (key == null || key.isBlank()) throw new IllegalStateException("DEEPSEEK_API_KEY is required");
@@ -58,60 +57,58 @@ final class AgentSessions {
         return id == null ? null : sessions.get(id);
     }
 
+    // Test constructor uses the exact same Session and runner factory without remote credentials.
+    AgentSessions(ChatModel client, Path projectRoot, String exaKey) {
+        this.client = client; this.projectRoot = projectRoot; this.exaKey = exaKey;
+    }
+
     final class Session {
         private final String id = UUID.randomUUID().toString();
-        private final AtomicBoolean running = new AtomicBoolean();
-        private final AtomicReference<EventSink> currentSink = new AtomicReference<>();
-        private final BrowserApproval approvals = new BrowserApproval(this::emit);
-        private final ReActRunner loop;
-        private final ToolRegistry tools;
+        private final ToolRegistry tools = new ToolRegistry();
+        private AgentMode mode;
+        private AgentRunner runner;
+        private RunLease activeRun;
 
         private Session() {
-            tools = new ToolRegistry();
             tools.register(new CalculatorTool(json));
-            tools.register(new BashTool(json, projectRoot, approvals::approveCommand, approvals::approveOutput));
+            tools.register(new BashTool(json, projectRoot, command -> false, output -> false));
             tools.register(new SearchTool(json, exaKey));
-            loop = new ReActRunner(new DefaultReActEngine(tools));
         }
-
-        String id() {
-            return id;
+        String id() { return id; }
+        synchronized RunLease accept(String prompt, ModelSettings settings, AgentMode requested) {
+            if (prompt == null || prompt.isBlank() || prompt.length() > 10_000 || settings == null)
+                throw new ApiFailure(400, "INVALID_REQUEST", "A nonblank prompt of at most 10000 characters is required.");
+            if (activeRun != null) throw new ApiFailure(409, "RUN_IN_PROGRESS", "This conversation is already running.");
+            AgentMode selected = requested != null ? requested : mode != null ? mode : AgentMode.REACT;
+            if (mode != null && mode != selected) throw new ApiFailure(409, "MODE_LOCKED", "Start a new conversation to change mode.");
+            AgentRunner candidate = runner != null ? runner : switch (selected) {
+                case REACT -> new ReActRunner(new DefaultReActEngine(tools));
+                case REWOO -> new dev.learning.agent.core.rewoo.RewooRunner(tools);
+                case PLAN_EXECUTE -> new dev.learning.agent.core.planexecute.PlanExecuteRunner(tools, new DefaultReActEngine(tools));
+            };
+            var request = new ExecutionRequest(UUID.randomUUID(), prompt, settings);
+            RunLease lease = new RunLease(request, selected, candidate, client, tools, this::release);
+            mode = selected; runner = candidate; activeRun = lease;
+            lease.arm();
+            return lease;
         }
-
-        boolean begin() {
-            return running.compareAndSet(false, true);
+        RunResult execute(RunLease lease, EventSink events) throws Exception {
+            synchronized (this) { if (activeRun != lease) return null; }
+            return lease.execute(events);
         }
-
-        void run(String prompt, ModelSettings settings, EventSink sink) throws Exception {
-            currentSink.set(sink);
-            try {
-                UUID requestId = UUID.randomUUID();
-                RunContext context = RunContexts.create(requestId, AgentMode.REACT, client, tools,
-                        event -> {
-                            RuntimeEvent transport = (RuntimeEvent) event;
-                            emit(transport.type(), transport.data());
-                        }, (kind, content, scope, control) -> "command".equals(kind)
-                                ? approvals.approveCommand(content) : approvals.approveOutput(content));
-                try {
-                    RunResult result = loop.run(new ExecutionRequest(requestId, prompt, settings), context);
-                    if (result.status() != ExecutionStatus.COMPLETE) throw new java.io.IOException(result.answer());
-                } finally { context.control().close(); }
-            } finally {
-                approvals.cancel();
-                currentSink.set(null);
-                running.set(false);
-            }
+        synchronized SessionStatus status() {
+            return new SessionStatus(id, java.util.List.of(AgentMode.values()), AgentMode.REACT, mode, mode != null,
+                    activeRun != null, activeRun == null ? null : activeRun.requestId());
         }
-
-        boolean decide(String id, boolean approved) {
-            return approvals.decide(id, approved);
+        boolean decide(String approvalId, boolean approved) {
+            RunLease current;
+            synchronized (this) { current = activeRun; }
+            return current != null && current.decide(approvalId, approved);
         }
-
-        private void emit(String type, Object data) {
-            EventSink sink = currentSink.get();
-            if (sink != null) {
-                sink.emit(type, data);
-            }
+        private synchronized void release(RunLease expected) {
+            if (activeRun == expected) activeRun = null;
         }
     }
+    record SessionStatus(String sessionId, java.util.List<AgentMode> supportedModes, AgentMode defaultMode,
+                         AgentMode mode, boolean modeLocked, boolean running, UUID activeRequestId) {}
 }

@@ -7,6 +7,7 @@
   <title>Agent Loop</title>
   <link rel="stylesheet" href="/app.css">
   <script src="/trace.js" defer></script>
+  <script src="/conversation-state.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -19,6 +20,19 @@
       <button type="button" data-view="conversation" aria-selected="true">对话</button>
       <button type="button" data-view="trace" aria-selected="false">轨迹</button>
     </nav>
+    <section class="mode-bar" aria-label="对话执行模式">
+      <div class="mode-setting">
+        <label id="mode-label" for="mode-select">执行模式</label>
+        <select id="mode-select">
+          <option value="REACT">ReAct</option>
+          <option value="REWOO">ReWOO</option>
+          <option value="PLAN_EXECUTE">Plan-and-Execute</option>
+        </select>
+        <strong id="current-mode" hidden></strong>
+        <span id="mode-hint">首条消息发送后固定，可新建对话切换。</span>
+      </div>
+      <button id="new-conversation" type="button" disabled>新建对话</button>
+    </section>
     <main id="conversation" class="conversation" aria-live="polite">
       <section id="welcome" class="welcome">
         <div class="welcome-icon">✦</div>
