@@ -73,6 +73,10 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
         return save(name, args, id, scope, failure(ToolStatus.SKIPPED, "NOT_EXECUTED", reason, false), 0, context);
     }
 
+    public static Evidence rejected(String name, String args, String id, RunScope scope, RunContext context, String reason) {
+        return save(name, args, id, scope, failure(ToolStatus.ERROR, "BINDING_FAILED", reason, false), 0, context);
+    }
+
     public static ToolResult failure(ToolStatus status, String code, String content, boolean executed) {
         return new ToolResult(status, content, code, executed, false, false);
     }
