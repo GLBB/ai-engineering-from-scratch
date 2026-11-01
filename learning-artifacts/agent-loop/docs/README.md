@@ -13,6 +13,10 @@
 
 已经熟悉 Agent 基本概念的话，可以直接从 [AgentLoop.java](../src/main/java/dev/learning/agent/core/AgentLoop.java) 开始读，再根据调用关系返回文档。
 
+## 开发设计与研究
+
+[三模式技术方案](design/agent-execution-technical-design.md) 是开发时的统一依据，确定接口、算法、对话模式锁定、异常、文件改造和测试；[研究记录](design/agent-execution-research.md)只保存来源与事实依据。上述 01–06 篇解释当前已实现代码，复习总结见 [review-notes](../../review-notes/README.md)。新增模式仍待实施。
+
 ## 先记住三个概念
 
 | 概念 | 在本项目里的含义 |

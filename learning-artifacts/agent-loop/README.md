@@ -6,6 +6,8 @@
 
 想通过代码理解项目，可以从 [docs/Agent Loop 学习指南](docs/README.md) 开始，按顺序了解项目结构、一次对话的执行过程、协议适配和调试方法。
 
+[三模式技术方案](docs/design/agent-execution-technical-design.md) 是 ReAct / ReWOO / Plan-and-Execute 的统一开发依据，包含 Java 接口、执行算法、状态机、逐文件改动和验收计划；[研究记录](docs/design/agent-execution-research.md)保留来源与离线实测。模式在新对话首次发送前选择，接受后固定；新增功能尚未实现。
+
 [三种协议图解](docs/06-three-protocols-by-example.md) 用同一次真实计算对话，逐项标注规则、用户、助手、工具结果和宿主程序，展示完整请求与响应，并解释 developer 与思考内容的归属。
 
 [工具调用实验](docs/05-tool-calls-and-transcripts.md) 对比少回一个结果、执行上限和倒序返回三个场景，并梳理 Chat Completions、Responses、Anthropic Messages 与 Bedrock Converse 的对话记录。实验无需 API key，在本目录运行 `mvn -Dtest=ToolTranscriptExperimentTest,AgentLoopTest test`，可在 `target/tool-transcript-experiment/` 查看生成的请求 JSON。
