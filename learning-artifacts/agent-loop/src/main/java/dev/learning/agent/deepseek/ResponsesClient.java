@@ -85,8 +85,14 @@ public final class ResponsesClient implements ChatModel {
 
     AssistantTurn read(InputStream input, Consumer<String> onText) throws IOException {
         Response[] completed = new Response[1];
+        int[] streamedCharacters = {0};
         StreamingHttp.readEvents(input, data -> {
             EventType event = json.readValue(data, EventType.class);
+            if (event.type() != null && event.type().endsWith(".delta")) {
+                Delta delta = json.readValue(data, Delta.class);
+                if (delta.delta() != null) streamedCharacters[0] += delta.delta().length();
+                if (streamedCharacters[0] > 16_000) throw new IOException("model output too large");
+            }
             if ("response.output_text.delta".equals(event.type())) {
                 Delta delta = json.readValue(data, Delta.class);
                 if (delta.delta() != null) onText.accept(delta.delta());

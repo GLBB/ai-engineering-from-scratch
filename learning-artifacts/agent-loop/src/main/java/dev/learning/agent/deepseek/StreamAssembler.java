@@ -45,7 +45,9 @@ public final class StreamAssembler {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             String line;
             StringBuilder event = new StringBuilder();
+            int total = 0;
             while ((line = StreamingHttp.readLine(reader)) != null) {
+                if ((total += line.length()) > 1_048_576) throw new IOException("model stream is too large");
                 if (line.isEmpty()) {
                     dispatch(event);
                     event.setLength(0);
@@ -53,6 +55,7 @@ public final class StreamAssembler {
                 } else if (line.startsWith("data:")) {
                     if (!event.isEmpty()) event.append('\n');
                     event.append(line.substring(5).stripLeading());
+                    if (event.toString().getBytes(StandardCharsets.UTF_8).length > 131_072) throw new IOException("SSE event is too large");
                 }
             }
             if (!event.isEmpty()) dispatch(event);

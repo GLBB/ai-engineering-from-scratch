@@ -12,7 +12,7 @@ public final class RewooPlanParser {
     public static RewooPlan parse(String text) throws IOException {
         JsonNode root = StrictJson.object(text);
         StrictJson.fields(root, "version", "steps", "answerEvidence");
-        if (!root.path("version").isIntegralNumber() || root.path("version").asInt() != 1) {
+        if (!root.path("version").isIntegralNumber() || !root.path("version").canConvertToInt() || root.path("version").asInt() != 1) {
             throw new PlanValidationException("unsupported plan version");
         }
         if (!root.path("steps").isArray()) throw new PlanValidationException("steps must be an array");

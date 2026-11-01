@@ -149,6 +149,9 @@ public final class AnthropicClient implements ChatModel {
                 case "message_stop" -> done[0] = true;
                 default -> { }
             }
+            int characters = blocks.values().stream().mapToInt(block -> block.text.length()
+                    + block.thinking.length() + block.input.length() + block.signature.length()).sum();
+            if (characters > 16_000) throw new IOException("model output too large");
         });
         if (!done[0] || stopReason[0] == null) throw new IOException("incomplete DeepSeek Anthropic stream");
         if (!"end_turn".equals(stopReason[0]) && !"tool_use".equals(stopReason[0])) {

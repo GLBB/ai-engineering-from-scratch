@@ -74,6 +74,8 @@ public final class DefaultRunControl implements RunControl {
         try { action.run(); } catch (RuntimeException ignored) { /* Continue closing other resources. */ }
     }
 
+    public synchronized boolean cancelled() { return reason != null; }
+
     public synchronized void close() {
         closed = true;
         actions.clear();

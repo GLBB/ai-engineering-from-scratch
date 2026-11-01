@@ -121,7 +121,9 @@ class ReActRunnerTest {
         loop.run("retry", ModelSettings.defaults());
 
         assertTrue(toolNotifications.isEmpty());
-        assertEquals(List.of("system", "user", "user"), roles(requests.get(1)));
+        assertEquals(List.of("system", "user", "user", "user"), roles(requests.get(1)));
+        assertEquals("FAILED", StrictJson.object(requests.get(1).get(2).content()).path("status").asText());
+        assertTrue(requests.get(1).stream().noneMatch(message -> "partial".equals(message.content())));
     }
 
     @Test
@@ -142,9 +144,10 @@ class ReActRunnerTest {
         assertThrows(IOException.class, () -> loop.run("next", ModelSettings.defaults()));
 
         List<ChatMessage> nextRequest = requests.get(2);
-        assertEquals(List.of("system", "user", "assistant", "tool", "assistant", "tool", "user"),
+        assertEquals(List.of("system", "user", "assistant", "tool", "assistant", "tool", "user", "user"),
                 roles(nextRequest));
         assertEquals("unknown tool unknown", content(nextRequest.get(5).content()));
+        assertEquals("BUDGET_EXHAUSTED", StrictJson.object(nextRequest.get(6).content()).path("status").asText());
     }
 
     @Test

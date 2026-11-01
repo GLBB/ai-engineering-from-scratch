@@ -27,14 +27,27 @@ public final class ReActRunner implements AgentRunner {
         RunContexts.start(request, context);
         var messages = new ArrayList<>(history);
         messages.add(ChatMessage.user(request.prompt()));
-        EngineResult result = engine.execute(new EngineRequest(messages, request.settings(),
-                Set.of("calculator", "search", "bash"), maxModels, 16, true,
-                new RunScope("REACT", null, 0), checkpoint -> history = checkpoint), context);
-        if (result.stop() == EngineStop.LOCAL_BUDGET) {
-            return new RunResult(ExecutionStatus.FAILED, CompletionCheck.UNVERIFIED,
-                    "agent stopped after " + maxModels + " model turns", "BUDGET_EXHAUSTED", context.budget().snapshot());
+        try {
+            EngineResult result = engine.execute(new EngineRequest(messages, request.settings(),
+                    Set.of("calculator", "search", "bash"), maxModels, 16, true,
+                    new RunScope("REACT", null, 0), checkpoint -> history = checkpoint), context);
+            if (result.stop() == EngineStop.LOCAL_BUDGET) {
+                recordFailure("BUDGET_EXHAUSTED");
+                return new RunResult(ExecutionStatus.FAILED, CompletionCheck.UNVERIFIED,
+                        "agent stopped after " + maxModels + " model turns", "BUDGET_EXHAUSTED", context.budget().snapshot());
+            }
+            return new RunResult(ExecutionStatus.COMPLETE, CompletionCheck.UNVERIFIED,
+                    result.finalTurn().content(), null, context.budget().snapshot());
+        } catch (IOException | InterruptedException | RuntimeException failure) {
+            recordFailure(context.control().cancelled() ? "CANCELLED" : "FAILED");
+            throw failure;
         }
-        return new RunResult(ExecutionStatus.COMPLETE, CompletionCheck.UNVERIFIED,
-                result.finalTurn().content(), null, context.budget().snapshot());
     }
+    private void recordFailure(String status) {
+        var checkpoint = new ArrayList<>(history);
+        checkpoint.add(ChatMessage.user(StrictJson.write(new HostStatus("host_run_status", status,
+                "The preceding request did not complete. Retain tool results as records of operations already attempted."))));
+        history = List.copyOf(checkpoint);
+    }
+    record HostStatus(String type, String status, String explanation) {}
 }

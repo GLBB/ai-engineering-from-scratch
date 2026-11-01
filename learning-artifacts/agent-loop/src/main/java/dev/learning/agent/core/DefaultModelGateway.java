@@ -54,7 +54,11 @@ public final class DefaultModelGateway implements ModelGateway {
             throw new IOException("DeepSeek returned tools with unexpected finish reason: " + answer.finishReason());
         }
         int size = answer.content().length() + (answer.reasoningContent() == null ? 0 : answer.reasoningContent().length());
-        for (var call : answer.calls()) size += call.function().arguments().length();
+        for (var call : answer.calls()) {
+            if (call == null || call.function() == null || call.function().arguments() == null || call.function().name() == null)
+                throw new IOException("malformed tool call");
+            size += call.function().arguments().length();
+        }
         if (size > 16_000) throw new IOException("model output too large");
     }
 

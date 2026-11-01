@@ -2,8 +2,6 @@ package dev.learning.agent.core;
 
 import dev.learning.agent.deepseek.model.ToolCall;
 import dev.learning.agent.tool.ToolRegistry;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Set;
 
 /** Per-session tools, with evidence and budget ownership supplied by each run. */
@@ -30,22 +28,34 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
         DefaultModelGateway.emit(context, scope, TraceEvent.toolStarted(traceId, round, at, name, arguments));
         context.emit("tool", "tool: " + name);
         ToolResult result;
+        boolean dispatched = false;
         try {
             context.control().check();
             if (!allowed.contains(name) || registry.find(name) == null) {
                 result = failure(ToolStatus.ERROR, "UNKNOWN_TOOL", "unknown tool " + name, false);
             } else {
                 ToolInput input = StrictJson.toolInput(name, arguments);
-                result = cachedCalculator(input, context);
-                if (result == null) result = registry.find(name).execute(input, scope, context);
+                if (context.mode() == AgentMode.PLAN_EXECUTE && input instanceof BashInput
+                        && context.evidence().snapshot().stream().anyMatch(item -> name.equals(item.tool())
+                        && StrictJson.write(input).equals(item.boundArgumentsJson()))) {
+                    result = failure(ToolStatus.DENIED, "DUPLICATE_BASH", "duplicate Bash request blocked in this run", false);
+                } else result = cachedCalculator(input, context);
+                if (result == null) {
+                    dispatched = true;
+                    result = registry.find(name).execute(input, scope, context);
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool interrupted", true);
+            result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool interrupted", dispatched);
+        } catch (java.util.concurrent.TimeoutException e) {
+            result = failure(ToolStatus.TIMEOUT, "TOOL_TIMEOUT", "tool timed out", dispatched);
+        } catch (java.util.concurrent.CancellationException e) {
+            result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool cancelled", dispatched);
         } catch (java.io.IOException | IllegalArgumentException | ArithmeticException e) {
-            result = failure(ToolStatus.ERROR, "TOOL_FAILED", "invalid tool arguments or operation: " + e.getMessage(), false);
+            result = failure(ToolStatus.ERROR, "TOOL_FAILED", "invalid tool arguments or operation: " + e.getMessage(), dispatched);
         } catch (Exception e) {
-            result = failure(ToolStatus.ERROR, "TOOL_FAILED", "tool failed", true);
+            result = failure(ToolStatus.ERROR, "TOOL_FAILED", "tool failed", dispatched);
         }
         context.budget().recordToolResult(result);
         Evidence evidence = save(name, arguments, id, scope, result, DefaultModelGateway.elapsed(started), context);

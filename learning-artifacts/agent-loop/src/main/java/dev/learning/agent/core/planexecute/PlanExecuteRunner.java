@@ -54,6 +54,7 @@ public final class PlanExecuteRunner implements AgentRunner {
             termination = decision.reason();
             if (decision instanceof ReplanDecision.ReviseDecision revision) {
                 GoalPlan next = ledger.revision(revision.remainingSteps(), names);
+                if (context.budget().snapshot().planRevisions() >= 2) { termination = "plan revision budget exhausted"; break; }
                 context.budget().claimRevision(); ledger.commit(next); display(context, ledger);
             } else if (decision instanceof ReplanDecision.FinishDecision finish) {
                 answerEvidence = finish.answerEvidence(); explicitPartial = finish.status().equals("PARTIAL"); break;

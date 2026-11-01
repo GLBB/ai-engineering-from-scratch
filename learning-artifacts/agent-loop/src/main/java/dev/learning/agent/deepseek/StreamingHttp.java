@@ -86,8 +86,12 @@ final class StreamingHttp {
     static String readLine(BufferedReader reader) throws IOException {
         StringBuilder line = new StringBuilder();
         int value;
+        int bytes = 0;
+        boolean highSurrogate = false;
         while ((value = reader.read()) != -1 && value != '\n') {
-            if (line.length() >= 131_072) throw new IOException("SSE line is too large");
+            bytes += value < 0x80 ? 1 : value < 0x800 ? 2 : Character.isLowSurrogate((char) value) && highSurrogate ? 1 : 3;
+            highSurrogate = Character.isHighSurrogate((char) value);
+            if (bytes > 131_072) throw new IOException("SSE line is too large");
             if (value != '\r') line.append((char) value);
         }
         return value == -1 && line.isEmpty() ? null : line.toString();
@@ -107,7 +111,7 @@ final class StreamingHttp {
                     if (!data.isEmpty()) data.append('\n');
                     String value = line.substring(5);
                     data.append(value.startsWith(" ") ? value.substring(1) : value);
-                    if (data.length() > 131_072) throw new IOException("SSE event is too large");
+                    if (data.toString().getBytes(StandardCharsets.UTF_8).length > 131_072) throw new IOException("SSE event is too large");
                 }
             }
             if (!data.isEmpty()) consumer.accept(data.toString());

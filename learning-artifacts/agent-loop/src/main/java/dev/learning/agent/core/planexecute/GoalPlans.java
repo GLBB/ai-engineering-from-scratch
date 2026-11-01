@@ -15,8 +15,8 @@ public final class GoalPlans {
     public static GoalPlan parse(String text) throws IOException {
         JsonNode node = StrictJson.object(text);
         StrictJson.fields(node, "version", "revision", "steps");
-        if (!node.path("version").isIntegralNumber() || node.path("version").intValue() != 1
-                || !node.path("revision").isIntegralNumber() || node.path("revision").intValue() != 0) {
+        if (!node.path("version").isIntegralNumber() || !node.path("version").canConvertToInt() || node.path("version").intValue() != 1
+                || !node.path("revision").isIntegralNumber() || !node.path("revision").canConvertToInt() || node.path("revision").intValue() != 0) {
             throw new IOException("initial plan requires version 1 and revision 0");
         }
         return new GoalPlan(1, 0, steps(node.get("steps")));

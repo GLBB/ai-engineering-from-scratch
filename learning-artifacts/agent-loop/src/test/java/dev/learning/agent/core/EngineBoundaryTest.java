@@ -60,6 +60,27 @@ class EngineBoundaryTest {
         } finally { context.control().close(); }
     }
 
+    @Test void repeatedBashIsBlockedAndFailedExecutedOperationsAreCounted(@TempDir Path directory) {
+        ToolRegistry tools = new ToolRegistry();
+        tools.register(new BashTool(new ObjectMapper(), directory, ignored -> false, ignored -> false));
+        tools.register(new CalculatorTool(new ObjectMapper()));
+        int[] approvals = {0};
+        RunContext context = RunContexts.create(UUID.randomUUID(), AgentMode.PLAN_EXECUTE,
+                (r,t,c) -> new AssistantTurn("", List.of(), "stop"), tools, ignored -> {},
+                (kind, content, scope, control) -> { approvals[0]++; return false; });
+        try {
+            RunScope scope = new RunScope("EXECUTE", "S1", 0);
+            context.tools().invoke(new BashInput("pwd"), "E1", Set.of("bash"), scope, context);
+            Evidence duplicate = context.tools().invoke(new BashInput("pwd"), "E2", Set.of("bash"), scope, context);
+            assertEquals("DUPLICATE_BASH", duplicate.result().errorCode());
+            assertEquals(1, approvals[0]);
+            Evidence failed = context.tools().invoke(new CalculatorInput("1/0"), "E3", Set.of("calculator"), scope, context);
+            assertEquals(ToolStatus.ERROR, failed.result().status());
+            assertTrue(failed.result().executed());
+            assertEquals(1, context.budget().snapshot().toolsExecuted());
+        } finally { context.control().close(); }
+    }
+
     private static ToolCall calc(String id) {
         return new ToolCall(id, "function", new ToolCall.FunctionCall("calculator", "{\"expression\":\"1+2\"}"));
     }
