@@ -103,7 +103,7 @@ flowchart TD
 
 这是 **1 次用户轮次、2 次模型请求、1 次工具调用**。如果模型直接回答，则实际轨迹不同。
 
-代码入口：[AgentLoop.java](../agent-loop/src/main/java/dev/learning/agent/core/AgentLoop.java)。阅读顺序为 `run`、`requestModel`、`validateFinishReason`、`executeTool`，再看 [ToolRegistry](../agent-loop/src/main/java/dev/learning/agent/tool/ToolRegistry.java)。
+代码入口：[ReActRunner.run](../agent-loop/src/main/java/dev/learning/agent/core/react/ReActRunner.java)。先看会话历史，再读 [DefaultReActEngine.execute](../agent-loop/src/main/java/dev/learning/agent/core/react/DefaultReActEngine.java) 的反馈循环、[DefaultModelGateway.call](../agent-loop/src/main/java/dev/learning/agent/model/DefaultModelGateway.java) 的模型请求与结束校验，以及 [DefaultToolExecutionService](../agent-loop/src/main/java/dev/learning/agent/tool/DefaultToolExecutionService.java) 的工具分发和结果记录。
 
 ### 3. 协议复盘：同一段语义，三种表示
 
@@ -129,7 +129,7 @@ flowchart TD
 
 ## 四、三个实验留下的结论
 
-实验与记录来源：[工具调用上限与对话记录](../agent-loop/docs/05-tool-calls-and-transcripts.md)、[离线实验测试](../agent-loop/src/test/java/dev/learning/agent/deepseek/ToolTranscriptExperimentTest.java)、[循环测试](../agent-loop/src/test/java/dev/learning/agent/core/AgentLoopTest.java)。
+实验与记录来源：[工具调用上限与对话记录](../agent-loop/docs/05-tool-calls-and-transcripts.md)、[离线实验测试](../agent-loop/src/test/java/dev/learning/agent/deepseek/ToolTranscriptExperimentTest.java)、[循环测试](../agent-loop/src/test/java/dev/learning/agent/core/react/ReActRunnerTest.java)。
 
 ### 实验 A：模型给出三个调用，只允许执行两个
 
