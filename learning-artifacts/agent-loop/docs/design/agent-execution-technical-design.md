@@ -6,6 +6,8 @@
 
 本文是 ReAct、ReWOO、Plan-and-Execute 的统一开发依据，确定类边界、接口、状态转移、执行算法、改造顺序与验收用例。代码块中的 Java 类型是目标契约；算法标为伪代码，不表示功能已经实现。
 
+阅读时先沿第 3 节理解一次请求怎样流动，再看第 5 节的对话与运行管理，以及第 7–9 节的三种执行流程。第 4 节完整类型签名用于实现时查阅；理解主线后再展开，不需要先记住所有类名。
+
 ## 1. 文档保留与合并
 
 | 文档 | 用途与处理 |
@@ -36,7 +38,17 @@ P&E 的内部计划可以变，所属对话的模式不变。Plan-and-Execute �
 
 ## 3. 当前代码与目标调用链
 
-当前链路为 `ChatController → Session.run → AgentLoop.run → ChatModel / ToolRegistry`。AgentLoop 同时持有历史、调用模型、执行工具和输出事件；工具结果为字符串，run 返回 void。这两点阻碍步骤级复用与失败传播。
+当前链路为 `ChatController → Session.run → AgentLoop.run → ChatModel / ToolRegistry`。用户发来一条消息，Session 找到自己的 AgentLoop；循环请求模型，执行模型提出的工具调用，再把结果送回模型，直到本轮结束。这已经是一套可运行的 ReAct 实现。
+
+增加另外两种模式后，变化主要在“谁决定下一步、何时再次请求模型”。例如同样要求先算 `120+18`，再除以三：
+
+| 模式 | 这个任务怎样执行 | 需要复用什么 |
+| --- | --- | --- |
+| ReAct | 模型先选加法工具，看到 138 后再决定除法调用 | 现有的模型—工具反馈循环 |
+| ReWOO | Planner 先写出加法节点与引用它的除法节点，程序按依赖直接调用工具，最后求解 | 模型客户端和工具能力；Worker 不进入反馈循环 |
+| P&E | Planner 先给出“求和”“求商”两个高层目标，每个目标由局部反馈循环完成，之后检查剩余计划 | 可反复用于不同步骤的反馈循环，并取得明确的步骤结果 |
+
+因此把当前 AgentLoop 的职责分开：Runner 管整个任务的执行策略与历史，ReActEngine 管一段可复用的反馈循环。现有 run 返回 void、直接向页面输出、内部持有历史；P&E 若直接拿它执行每个步骤，就很难收集步骤结果，也容易混入整段对话的历史与输出。提取内核是为了解决这个具体复用问题。
 
 目标调用关系：
 
@@ -65,11 +77,26 @@ flowchart TD
     L --> O
 ```
 
-Runner 组织策略；ReActEngine 只实现可复用的工具反馈循环；ModelGateway 是所有真实模型请求的唯一入口；ToolExecutionService 是所有工具尝试的唯一入口。两处入口负责计数，避免每个 runner 各自计算成本。
+图中的共享入口负责统一的执行规则。ModelGateway 先检查预算、记录轨迹，再交给 ChatModel 把请求转换成具体协议；ToolExecutionService 校验调用、执行工具、保存证据，再把状态交还调用者。这样三种 Runner 都使用同样的计数与失败规则。
+
+ChatModel 的三个实现继续负责 HTTP 报文与 SSE；新增 Gateway 将预算和轨迹留在协议之外。切换协议时，任务策略和总预算的含义保持一致。
 
 ## 4. 共享 Java 契约
 
+先区分几个名字对应的时间范围。以同一对话中先发“搜索资料”、再发“总结结果”为例，Session 会一直存在，每条用户消息各有一次 RunLease 和 RunContext；其中又可能发起多次 ModelRequest。
+
+| 对象 | 管什么 | 存在多久 |
+| --- | --- | --- |
+| Session | 对话模式、Runner、历史，以及当前由谁占用执行 | 一段对话 |
+| RunLease | 某次请求是否已启动、如何取消、何时释放占用 | 一次用户请求的接受到清理完成 |
+| RunContext | 本轮共享的预算、证据、取消信号与执行服务 | 一次用户请求；P&E 各步骤共用 |
+| ModelRequest | 某一次发给模型的历史、工具和输出配置 | 一次模型请求 |
+| ToolResult / Evidence | 工具执行结果，以及该结果的编号和来源 | 当前 run；用于绑定、检查与轨迹 |
+
 以下签名集中展示，实施时每个 public 类型放入独立文件，类型路径见第 13 节。集合参数在构造时复制；返回快照不暴露内部可变集合。
+
+<details>
+<summary>展开共享 Java 接口与数据类型的完整签名</summary>
 
 <!-- contract: core -->
 ```java
@@ -195,6 +222,8 @@ public interface RunContext {
 }
 ```
 
+</details>
+
 实现类为 `DefaultReActEngine`、`DefaultModelGateway`、`DefaultToolExecutionService`、`DefaultRunBudget`、`DefaultRunControl`、`DefaultRunContext` 和 `InMemoryEvidenceStore`。状态只存在于当前对话或当前 run；模型客户端可共用，不保存对话状态。
 
 `ModelGateway.call` 先消费预算、发开始事件，再调用客户端，最后记录成功或失败。进入客户端的一次尝试计入 modelCalls，即使随后失败；它不是服务端计费次数。`OutputMode.JSON_OBJECT` 表示应用要求解析 JSON；三协议的实际格式参数见第 11 节。
@@ -217,6 +246,10 @@ stateDiagram-v2
 ```
 
 NEW 的 mode 为 null。IDLE 和 RUNNING 的 mode 永不改变；新建对话创建另一个 Session，而不是把原 Session 重置为 NEW。
+
+同一个 Session 串行执行，是因为它持有一份对话历史、一个当前输出通道 currentSink 和一个等待确认的操作。两个请求同时运行，会交叉追加历史，把输出发送到被另一个请求覆盖的通道，并争用工具确认。即使把历史列表换成线程安全集合，也没有定义两条执行分支应怎样合并。当前 demo 的 Session.begin 已用 running 防止这种并发；本方案延续这条规则。
+
+不同 Session 可以分别执行；如果将来要让同一对话并发，需要另外设计分支历史、独立输出与确认、结果合并规则。P&E 在一个请求内部执行多个步骤，仍占用同一个 Session，不等于接收了多个并发用户请求。
 
 Session 替换 `begin()` / `run(String, ModelSettings, EventSink)`，对外提供：
 
@@ -282,17 +315,66 @@ accept(validatedPrompt):
 
 错误体统一为 `ApiError(code, message)`；未知枚举等 Spring 反序列化异常也通过本地 ControllerAdvice 转换，不能返回默认 HTML。
 
-### 5.3 RunLease 的异步清理
+### 5.3 RunLease：一次请求的执行占用与清理
 
-lease 状态为 ACCEPTED、RUNNING、CLOSED。流回调通过 CAS 从 ACCEPTED 进入 RUNNING；只允许一次。取消发生在 ACCEPTED 时直接关闭并释放；发生在 RUNNING 时触发取消动作，由执行线程的 finally 释放，避免旧任务尚未停止却接收新任务。
+ReAct 原本就需要管理运行占用：Session.begin 把 running 设为 true，Session.run 的 finally 取消确认、清空 currentSink，再恢复空闲。已有实现覆盖了正常进入执行后的基本清理。
+
+RunLease 是本方案新增的普通 Java 对象，用来集中管理这次占用的身份和生命周期。它把“当前很忙”细化为“请求 A 占用、执行是否开始、是否已结束”，让执行线程、HTTP 连接回调与超时任务都操作属于 A 的同一个对象。ReAct、ReWOO 和 P&E 都使用它。
+
+| 对象或状态 | 职责 |
+| --- | --- |
+| Session.accept 的同步检查 | 保证同一对话只接受一个执行者，建立 activeRun |
+| RunLease 的 requestId 和状态 | 标识占用者，协调启动、取消与结束 |
+| RunContext 中的 RunControl | 保存取消信号，触发已注册的流关闭、进程终止和等待唤醒 |
+| Session.release(expectedLease) | 核对当前占用者，只释放这次运行所属的状态 |
+
+RunLease 负责协调这些动作，具体关闭 SSE 或终止 Bash 进程仍由相应资源的取消处理完成。它也不能单独提供互斥；接受请求时的 Session 同步检查仍然必需。
+
+其状态为 ACCEPTED、RUNNING、CLOSED。ACCEPTED 表示服务端已接受、占用了执行位置，但异步回调可能还没启动；RUNNING 表示执行回调已实际开始；CLOSED 表示这次运行已结束。这里 Session 的 RUNNING 表示存在 activeRun，因此也包含 lease 仍为 ACCEPTED 的短暂阶段。
+
+这些区别在三个场景中有用：
+
+| 场景 | 具体经过 | RunLease 的处理 |
+| --- | --- | --- |
+| 接受后、启动前取消 | A 已通过 accept，但 StreamingResponseBody 的执行回调还没开始，容器已通知连接结束 | 关闭 ACCEPTED 状态的 A 并释放占用；迟到的执行回调无法再次启动它。不能依赖尚未进入的执行代码里的 finally |
+| 执行中取消 | A 的 Bash 命令仍在运行，HTTP 层请求取消 | 先通知进程和等待停止，继续占用 Session；执行线程退出并清理后才释放，期间新请求仍被拒绝 |
+| 旧回调迟到 | A 已结束，B 开始运行，此时 A 的延迟超时回调才到达 | A 已关闭，重复取消不再产生效果；即使调用 release，也不能释放当前属于 B 的占用 |
+
+因此取消要区分“已提出停止”与“已完成清理”。下面展示执行中取消的路径：
+
+```mermaid
+sequenceDiagram
+    participant H as HTTP 生命周期回调
+    participant L as RunLease A
+    participant C as RunControl A
+    participant W as 执行线程与工具
+    participant S as Session
+    H->>L: cancel：断连或超时已被检测
+    L->>C: 设置取消信号并触发资源关闭
+    C->>W: 关闭流、唤醒确认或终止进程
+    Note over S: activeRun 仍为 A，拒绝新请求
+    W->>L: finally 中 finish
+    L->>S: release，核对 activeRun 是否仍为 A
+    S->>S: 清理本轮状态，恢复空闲
+```
+
+实现时，启动、取消和释放必须满足以下条件：
+
+- tryStart 只允许一次从 ACCEPTED 原子转为 RUNNING；已取消或已关闭的 lease 不能启动。
+- cancel 发生在 ACCEPTED 时可以直接关闭并释放；发生在 RUNNING 时只发取消信号，等待执行线程的 finally 完成释放。
+- finish 只由已启动的执行线程在清理路径中调用；重复 finish、cancel 不重复清理。已经 CLOSED 的 lease 不再触发旧资源的取消动作。
+- release(expectedLease) 只有在 Session.activeRun 就是 expectedLease 时才能取消所属确认、清空输出通道并移除 activeRun；旧回调不得直接写 running=false。
+- 每个确认和资源取消动作都关联当前 requestId，结束后注销本轮回调，避免旧动作影响新请求。
 
 Controller 注册 `AgentRunInterceptor implements CallableProcessingInterceptor`；handleTimeout、handleError 和 afterCompletion 都调用幂等的 lease.cancel。通过 WebAsyncManager.registerCallableInterceptor 绑定当前 requestId；finally 仍是运行中 lease 的唯一释放位置。这些是 Spring MVC 提供的异步生命周期钩子。[Spring 6.2 API](https://docs.spring.io/spring-framework/docs/6.2.x/javadoc-api/org/springframework/web/context/request/async/CallableProcessingInterceptor.html)
 
-必须测试“accept 已完成，但流回调尚未启动就断开”的情况，不能只依赖 runner 内的 finally。
+测试覆盖上述三种时序，并分别检查执行是否启动、资源是否停止、占用是否被正确释放。关闭一次 RunLease 不会删除 Session 的历史或解除模式锁定；下一条消息建立新的 RunLease，继续使用同一 Runner。
 
 ## 6. 工具结果、证据与原生调用配对
 
 ### 6.1 工具接口改造
+
+当前 ToolRegistry 用字符串同时表达结果和错误。模型能阅读这些文字，但程序要决定是否执行下游节点，就需要明确状态。例如 search 请求正常完成却没有匹配项：工具实际运行了，后续仍没有可用值。ToolResult 将这些事实拆开，Evidence 再加上 ID、所属步骤和耗时，供依赖绑定与复盘使用。
 
 `AgentTool.execute(String)` 改成下面的目标方法；工具注册表只负责目录、查找与参数解码，执行状态和事件集中在 ToolExecutionService。
 
@@ -339,6 +421,9 @@ ReWOO 的证据 ID 等于计划节点 ID。ReAct/P&E 使用本 run 内递增的 
 
 ## 7. ReActEngine 与历史检查点
 
+ReActRunner 保留整段 ReAct 对话的历史，ReActEngine 负责一次被调用的反馈循环。对话式 ReAct 通常每条用户消息调用它一次；P&E 的 StepExecutor 可以按高层步骤多次调用它，每次提供不同的目标、局部历史和工具范围，再取得 EngineResult。
+
+例如 P&E 的“求和”步骤结束后，外层需要读到结果 138，判断是否完成，再开始“除以三”。这要求内核能返回数据与结束原因，而不是只把文字推给浏览器后返回 void。局部步骤使用同一个 RunContext，因此不会为每一步重新获得全套预算。
 ### 7.1 内核算法
 
 ```text
@@ -364,6 +449,8 @@ execute(engineRequest, context):
 所有模型请求都经过 Gateway；局部额度与 RunBudget 同时生效。发布文本由 publishText 决定：对话式 ReAct 为 true，P&E 子步骤为 false。完整的 AssistantTurn 保留协议 blocks/reasoning 信息，不能只存可见文本。
 
 ### 7.2 对话历史提交
+
+这里的“检查点”指一段已经完整、可以继续回放给模型的历史。例如 assistant 声明三个工具调用，应连同三个对应结果一起保存；只保存两个结果，就还不是完整的往返。
 
 `ReActRunner` 为每轮复制已保存 transcript，追加 user 后交给内核。每次只提交完整 assistant/tool 批次或完整最终响应；异常响应与半个流不进入持久的内存历史。
 
@@ -521,6 +608,8 @@ S1 成功、S2 不足、新增 S3 时保留 S1/E1，保留 S2 尝试记录，不
 
 ### 10.1 固定预算
 
+RunContext 贯穿一次用户请求，RunBudget 记录它已经消费的资源。P&E 即使包含多个步骤，也只是同一次运行的内部执行：若每个步骤都新建一份独立总预算，外层的模型请求上限就失去约束。因此步骤局部限额与共享全局限额同时检查。
+
 | 限制 | ReAct | ReWOO | P&E |
 | --- | --- | --- | --- |
 | 全局模型请求 | 8 | 3：规划、可选修复、求解 | 35：1+24+8+1+1 |
@@ -539,6 +628,8 @@ P&E 的 35=初始规划 1+最多 8×3 次步骤模型+最多 8 次 review+Finali
 超出证据上限时显式标记 truncated；截断证据不能做精确参数绑定或支撑 COMPLETE，可作为部分结果供最终说明。API token 参数与应用文本/时间上限同时存在。
 
 ### 10.2 取消的实际落点
+
+HTTP 断连或超时先交给第 5.3 节的 RunLease，它通知本轮 RunControl。RunControl 再让具体客户端和工具停止阻塞；执行线程完成清理后，RunLease 才释放 Session。下面列的是实际停止资源的位置，不能只修改一个取消标记就认为操作已经结束。
 
 DefaultRunControl 使用 System.nanoTime 截止时间和取消原因；onCancel 注册资源关闭动作，返回值 close 只注销该动作。单个 ScheduledExecutorService 调度超时，bean 销毁时关闭调度器。
 
@@ -701,6 +792,7 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 - 首条请求校验失败不锁；接受后模型失败仍锁；缺省 mode 复用绑定；冲突 mode 409。
 - 模式栏位于导航下方、对话框上方；选择与锁定后展示不换位置；对话/轨迹切换时保持可见，消息输入区没有重复模式控件。
 - 并发首条请求至多一个成功；异步任务未启动就取消也能释放；执行未退出前不得释放锁。
+- A 已结束、B 已开始后再触发 A 的延迟取消/释放回调，B 的输出通道、确认状态和执行占用仍保持有效；重复回调不会重复清理。
 - 模型返回三个调用而局部只允许两个，第三个得到明确 SKIPPED，下一次请求没有未配对调用。
 - 拒绝 Bash 输出分享后，用唯一占位串检查所有后续模型请求、证据、对话历史与普通日志均无原输出。
 - P&E 的 S1 成功、S2 无结果、S3 替代成功：S1 不重跑，旧记录不覆盖，revision 和全局计数正确。
