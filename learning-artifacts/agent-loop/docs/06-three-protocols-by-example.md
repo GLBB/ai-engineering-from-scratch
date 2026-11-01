@@ -305,7 +305,7 @@ Anthropic 的内容块结构示意：
 
 ## 与本项目代码怎样对应
 
-宿主内部统一保存 `ChatMessage`，不要求 AgentLoop 自己维护三种外部 JSON：
+宿主内部统一保存 `ChatMessage`，不要求 ReActRunner 自己维护三种外部 JSON：
 
 | 内部记录 | Chat Completions 适配 | Responses 适配 | Anthropic 适配 |
 | --- | --- | --- | --- |

@@ -15,7 +15,7 @@ flowchart LR
     User[用户] --> Browser[浏览器页面]
     Browser -->|HTTP：提问、确认、设置| App[app：Web 接口和会话]
     App -->|NDJSON：文字和轨迹事件| Browser
-    App --> Loop[core：AgentLoop]
+    App --> Loop[core：Runner / ReActEngine]
     Loop --> Model[deepseek：协议客户端]
     Model -->|HTTPS + SSE| DeepSeek[DeepSeek API]
     Loop --> Tools[tool：工具注册和执行]
@@ -36,7 +36,7 @@ flowchart LR
 | [app](../src/main/java/dev/learning/agent/app/) | 启动服务、接收页面请求、管理会话和设置。 | [WebMain](../src/main/java/dev/learning/agent/app/WebMain.java) |
 | [app/chat](../src/main/java/dev/learning/agent/app/chat/) | 聊天接口、每个页面的会话以及 Bash 确认。 | [ChatController](../src/main/java/dev/learning/agent/app/chat/ChatController.java)、[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) |
 | [app/settings](../src/main/java/dev/learning/agent/app/settings/) | 读取、保存 API 协议设置。 | [SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) |
-| [core](../src/main/java/dev/learning/agent/core/) | 维护历史、调用模型、分发工具、产生轨迹。 | [AgentLoop](../src/main/java/dev/learning/agent/core/ReActRunner.java) |
+| [core](../src/main/java/dev/learning/agent/core/) | 维护历史、调用模型、分发工具、产生轨迹。 | [ReActRunner](../src/main/java/dev/learning/agent/core/ReActRunner.java) |
 | [deepseek](../src/main/java/dev/learning/agent/deepseek/) | 将历史和工具转换为具体协议，读取模型流式响应。 | [ChatModel](../src/main/java/dev/learning/agent/core/ChatModel.java) 和三个客户端 |
 | [tool](../src/main/java/dev/learning/agent/tool/) | 工具定义、注册和实际执行。 | [ToolRegistry](../src/main/java/dev/learning/agent/tool/ToolRegistry.java) |
 | [static](../src/main/resources/static/) | HTML、样式、聊天交互和轨迹渲染。 | [app.js](../src/main/resources/static/app.js)、[trace.js](../src/main/resources/static/trace.js) |
@@ -44,8 +44,8 @@ flowchart LR
 
 ## 进程中保存了什么
 
-启动时，[SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) 读取协议设置，[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) 根据这个设置创建协议客户端。每次页面请求 `/api/session`，服务端创建一个新会话；每个会话有独立的 `AgentLoop`、消息历史和确认状态。
+启动时，[SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) 读取协议设置，[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) 根据这个设置创建协议客户端。每次页面请求 `/api/session`，服务端创建一个新会话；首条请求接受时为会话创建一个固定模式的 Runner，持有独立历史。每个已接受请求拥有自己的 RunLease、事件通道、确认和 RunContext，Session 在它清理完成前拒绝其他请求。
 
-消息历史在服务端内存中。页面刷新会请求新会话，重启进程后会话消失；目前没有会话持久化或自动裁剪。模型和推理等级每次发送消息时由页面提交，API 协议在进程启动时确定。
+消息历史在服务端内存中。页面刷新会请求新会话，重启进程后会话消失；目前没有会话持久化；ReAct 历史不自动裁剪，ReWOO/P&E 仅保留有限的已完成问答。模型和推理等级每次发送消息时由页面提交，API 协议在进程启动时确定。
 
 下一步沿着实际调用顺序看：[一次对话如何运行](02-agent-loop.md)。

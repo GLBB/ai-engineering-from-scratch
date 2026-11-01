@@ -14,7 +14,7 @@
 | Responses | [ResponsesClient](../src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | `/responses` | `input` 中的消息、`function_call`、`function_call_output` 和语义化流事件。 |
 | Anthropic Messages | [AnthropicClient](../src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | `/anthropic/v1/messages` | 有顺序的内容块，`tool_use`、`tool_result` 和 thinking 内容。 |
 
-[AgentLoop](../src/main/java/dev/learning/agent/core/ReActRunner.java) 处理统一后的回答、工具调用和结束原因；具体请求和响应的差别由客户端处理。DeepSeek 的 Responses 接口是无状态的，每次请求都需要携带完整历史。
+[ReActRunner](../src/main/java/dev/learning/agent/core/ReActRunner.java) 处理统一后的回答、工具调用和结束原因；具体请求和响应的差别由客户端处理。DeepSeek 的 Responses 接口是无状态的，每次请求都需要携带完整历史。
 
 ## 模型和推理等级怎么传
 
@@ -34,7 +34,7 @@ API 协议由设置页面选择。[SettingsStore](../src/main/java/dev/learning/
 ```mermaid
 flowchart LR
     DS[DeepSeek] -->|SSE：模型协议事件| Client[协议客户端]
-    Client -->|文本回调与完整 AssistantTurn| Loop[AgentLoop]
+    Client -->|文本回调与完整 AssistantTurn| Loop[ReActRunner]
     Loop -->|text / tool / trace / approval| Controller[ChatController]
     Controller -->|NDJSON：每行一个 JSON 事件| Browser[浏览器 app.js]
     Browser --> Trace[trace.js 渲染轨迹]
@@ -47,7 +47,7 @@ flowchart LR
 
 ## 工具调用和思考内容怎样回传
 
-`AgentLoop` 将模型的工具调用与对应的结果保存到历史。各客户端发送下一次请求时再做转换：
+`ReActRunner` 将模型的工具调用与对应的结果保存到历史。各客户端发送下一次请求时再做转换：
 
 - Chat Completions 使用 assistant 的 `tool_calls` 和 tool 消息的 `tool_call_id` 关联结果。
 - Responses 将调用和结果转换为 `function_call`、`function_call_output`，通过 `call_id` 关联。
@@ -57,7 +57,7 @@ flowchart LR
 
 ## 轨迹从哪里来
 
-[TraceEvent](../src/main/java/dev/learning/agent/core/TraceEvent.java) 描述用户输入、模型设置、模型请求、思考、工具和助手消息等事件。`AgentLoop` 在模型请求和工具执行开始、结束或失败时发出事件；开始和结束事件使用相同 ID，页面据此更新对应项的状态和耗时。
+[TraceEvent](../src/main/java/dev/learning/agent/core/TraceEvent.java) 描述用户输入、模型设置、模型请求、思考、工具和助手消息等事件。`DefaultModelGateway` 与 `DefaultToolExecutionService` 在模型请求和工具执行开始、结束或失败时发出事件；开始和结束事件使用相同 ID，页面据此更新对应项的状态和耗时。
 
 [trace.js](../src/main/resources/static/trace.js) 保存当前页面的事件，绘制时间线和可展开的列表。它展示应用实际收到和记录的内容；是否出现工具调用或思考内容，取决于本次模型响应。
 

@@ -1,12 +1,12 @@
 # Java Agent Loop
 
-这是学习 [Phase 14：The Agent Loop](../../phases/14-agent-engineering/01-the-agent-loop/docs/en.md) 后的 Java Maven 练习。它通过 DeepSeek 接收问题、选择工具、读取工具结果并继续生成回答，帮助理解 Agent 循环的基本组成。
+这是学习 [The Agent Loop](../../phases/14-agent-engineering/01-the-agent-loop/docs/en.md) 与 [ReWOO / Plan-and-Execute](../../phases/14-agent-engineering/02-rewoo-plan-and-execute/docs/en.md) 后的 Java Maven 练习。在同一个界面中比较三种执行方式，模型、工具和协议客户端由三者共用。
 
 程序以 Spring Boot 提供本地浏览器聊天界面。回答会实时显示，工具包括四则运算、Bash 和 Exa 搜索。默认使用 `deepseek-flash`，思考模式关闭；可在输入框中切换模型和推理等级。每个浏览器页面拥有独立的内存会话；刷新页面会开始新会话。
 
 想通过代码理解项目，可以从 [docs/Agent Loop 学习指南](docs/README.md) 开始，按顺序了解项目结构、一次对话的执行过程、协议适配和调试方法。
 
-[三模式技术方案](docs/design/agent-execution-technical-design.md) 是 ReAct / ReWOO / Plan-and-Execute 的统一开发依据，包含 Java 接口、执行算法、状态机、逐文件改动和验收计划；[研究记录](docs/design/agent-execution-research.md)保留来源与离线实测。模式在新对话首次发送前选择，接受后固定；新增功能尚未实现。
+[三模式技术方案](docs/design/agent-execution-technical-design.md) 是 ReAct / ReWOO / Plan-and-Execute 的统一开发依据，包含 Java 接口、执行算法、状态机、逐文件改动和验收计划；[研究记录](docs/design/agent-execution-research.md)保留来源与离线实测。模式在新对话首次发送前选择，接受后固定；三种模式均已实现；[实施验证](docs/design/agent-execution-research.md#实施后验证2026-11-01)记录本轮测试、真实接口矩阵和验证边界。
 
 [三种协议图解](docs/06-three-protocols-by-example.md) 用同一次真实计算对话，逐项标注规则、用户、助手、工具结果和宿主程序，展示完整请求与响应，并解释 developer 与思考内容的归属。
 
@@ -21,10 +21,11 @@
 ```bash
 source ~/.bashrc
 mvn test
+node --test src/test/js/*.test.js
 mvn spring-boot:run
 ```
 
-打开 `http://127.0.0.1:8080`，输入问题并在页面中查看流式回答。Bash 命令执行前以及命令输出发送给 DeepSeek 前，页面会分别要求确认。按 `Ctrl+C` 停止服务。服务只监听本机；端口可由 `AGENT_PORT` 调整。浏览器关闭后，等待中的 Bash 确认最多 5 分钟后会自动拒绝。
+打开 `http://127.0.0.1:8080`，在对话框上方选择执行模式，输入问题并查看回答。首条请求被接受后，模式栏改为只读；运行失败也不会解除锁定。点击同一栏右侧的“新建对话”可重新选择模式。Bash 命令执行前以及命令输出发送给 DeepSeek 前，页面会分别要求确认。按 `Ctrl+C` 停止服务。服务只监听本机；端口可由 `AGENT_PORT` 调整。检测到 HTTP 断连或超时后取消本轮资源；普通浏览器关闭不保证立刻被服务端检测。确认最多等待 5 分钟，整轮最多 15 分钟。
 
 输入框下方可选 `DeepSeek V4.1 Flash` 或 `DeepSeek V4 Pro`，推理等级可选 `Off`、`Low`、`High`、`Max`。默认 `Off`；选择其他等级会开启 Think，并将该等级用于这一轮用户请求的所有模型调用。下一轮可重新选择。模型 ID 和等级按 2026-10-31 的 [DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models/) 与 [思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/) 配置。
 
@@ -47,23 +48,21 @@ mvn spring-boot:run
 
 ```mermaid
 flowchart TD
-    User[用户 / 浏览器] --> Page[HTML + JavaScript：输入、流式显示与确认]
-    Page --> Controller[ChatController：聊天与确认接口]
-    Controller -->|NDJSON 事件流| Page
-    Controller --> Sessions[AgentSessions：每页独立会话]
-    Sessions --> Loop[AgentLoop：消息历史与循环]
-    Loop --> Client[协议客户端：构造请求]
-    Client --> API[DeepSeek：Chat Completions / Responses / Anthropic]
-    API --> Stream[协议适配器：解析 SSE]
-    Stream -->|文本片段| Controller
-    Stream -->|完整回复与工具调用| Loop
-    Loop --> Registry[ToolRegistry：按名称分发]
-    Registry --> Calc[CalculatorTool]
-    Registry --> Bash[BashTool]
-    Registry --> Search[SearchTool]
-    Search --> Exa[Exa Search API]
-    Bash -->|命令及输出分别确认| Page
-    Registry -->|工具结果| Loop
+    Page[浏览器：模式栏 / 对话 / 计划 / 轨迹] --> HTTP[ChatController]
+    HTTP --> Session[Session：固定模式与唯一 activeRun]
+    Session --> Lease[RunLease：请求身份与生命周期]
+    Lease --> React[ReActRunner：对话历史]
+    Lease --> Rewoo[RewooRunner：静态计划与证据]
+    Lease --> PE[PlanExecuteRunner：目标与重规划]
+    React --> Engine[共用 ReActEngine]
+    PE --> Step[StepExecutor：有界步骤]
+    Step --> Engine
+    Engine --> Gateway[ModelGateway / ToolExecutionService]
+    Rewoo --> Gateway
+    PE --> Gateway
+    Gateway --> Client[三个协议客户端]
+    Gateway --> Tools[calculator / search / Bash]
+    Tools -->|命令和输出分别确认| Page
 ```
 
 代码按职责组织，建议按下表顺序阅读。路径均相对于本项目。
@@ -76,7 +75,7 @@ flowchart TD
 | [`app/LocalRequest.java`](src/main/java/dev/learning/agent/app/LocalRequest.java) | 检查本地请求的主机和来源。 |
 | [`core/TraceEvent.java`](src/main/java/dev/learning/agent/core/TraceEvent.java) | 定义模型、工具和助手步骤的轨迹事件。 |
 | [`static/`](src/main/resources/static/) | 浏览器页面、样式和交互脚本。 |
-| [`core/AgentLoop.java`](src/main/java/dev/learning/agent/core/ReActRunner.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
+| [`core/ReActRunner.java`](src/main/java/dev/learning/agent/core/ReActRunner.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
 | [`deepseek/ChatCompletionsClient.java`](src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) | 处理 Chat Completions 请求和流式响应。 |
 | [`deepseek/ResponsesClient.java`](src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | 处理 Responses 请求、历史消息和流式事件。 |
 | [`deepseek/AnthropicClient.java`](src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | 处理 Anthropic 内容块、工具结果和流式事件。 |
@@ -89,7 +88,17 @@ flowchart TD
 
 ## 执行内核改造
 
-现有 ReAct 已拆成 `ReActRunner`（会话历史）和 `DefaultReActEngine`（模型与工具反馈循环）。`DefaultModelGateway` 统一模型调用、预算与轨迹，`DefaultToolExecutionService` 保存结构化证据；三个协议客户端支持纯文本请求与明确输出上限。工具结果通过调用 ID 配对，并包含宿主证据 ID 和状态。ReWOO、Plan-and-Execute 与模式选择在后续步骤接入。
+现有 ReAct 已拆成 `ReActRunner`（会话历史）和 `DefaultReActEngine`（模型与工具反馈循环）。`DefaultModelGateway` 统一模型调用、预算与轨迹，`DefaultToolExecutionService` 保存结构化证据；三个协议客户端支持纯文本请求与明确输出上限。工具结果通过调用 ID 配对，并包含宿主证据 ID 和状态。ReWOO 直接执行验证后的工具计划；Plan-and-Execute 通过 StepExecutor 复用内核，步骤后检查是否继续或修订。
+
+## 三种模式如何比较
+
+| 模式 | 谁决定下一步 | 适用的学习观察点 |
+| --- | --- | --- |
+| ReAct | 每次模型响应结合工具观察决定下一步 | 工具反馈如何改变后续调用 |
+| ReWOO | Planner 一次生成工具、参数与 `#E1` 引用；Worker 串行执行；Solver 汇总 | 静态依赖与少量模型调用；失败后不重规划 |
+| Plan-and-Execute | Planner 生成高层目标；步骤内 ReAct；Replanner 逐步检查；Finalizer 汇总 | 局部循环、证据保留、计划版本与重规划开销 |
+
+可以分别新建对话，使用同一个问题：`请分两步使用 calculator 计算 (120+18)/3：先求和，再除以3，列出和与商。` 在轨迹中比较模型请求数、工具尝试数、实际执行数、耗时与实际 token 用量。三种模式使用同一轮预算；步骤不会重新获得一份总预算。界面的“完成”代表执行契约满足，结果仍未做独立语义验证。
 
 ## 设计思路
 
@@ -107,13 +116,13 @@ Agent 循环可以理解为：**把当前消息交给模型 → 按模型请求�
 
 ## 一次请求如何执行
 
-以下以模型选择调用 `calculator` 为例；实际模型也可能直接回答，或选择其他工具。
+以下说明 ReAct 模式，以模型选择调用 `calculator` 为例；实际模型也可能直接回答，或选择其他工具。
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
     participant M as 浏览器 / ChatController
-    participant A as AgentLoop
+    participant A as ReActRunner / ReActEngine
     participant D as DeepSeek
     participant S as StreamAssembler
     participant T as ToolRegistry / calculator
@@ -144,7 +153,7 @@ sequenceDiagram
 | 4 | `tool` | 返回 `46`，通过 `tool_call_id` 关联第 3 条调用。 |
 | 5 | `assistant` | 基于结果生成最终回答。 |
 
-如果模型一次返回多个工具调用，当前实现按调用索引顺序逐个执行，并分别写入结果。同一页面内后续问题继续使用这份内存中的历史；刷新页面或退出进程后历史消失，目前没有持久化或自动裁剪。
+如果模型一次返回多个工具调用，当前实现按调用索引顺序逐个执行，并分别写入结果。同一页面内后续问题继续使用这份内存中的历史；刷新页面或退出进程后历史消失，ReAct 历史目前没有自动裁剪；ReWOO/P&E 只保留最近最多 4 个完整问答对、合计最多 24,000 字符，不回放旧轮次的原始证据。所有模式均无持久化。
 
 ## 工具与运行边界
 

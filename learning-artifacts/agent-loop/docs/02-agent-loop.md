@@ -1,75 +1,60 @@
-# 2. 一次对话如何运行
+# 一次 ReAct 对话如何执行
 
-[返回目录](README.md) · 上一篇：[项目全貌](01-architecture.md) · 下一篇：[协议、流式输出和轨迹](03-protocols-and-streaming.md)
+[返回学习指南](README.md) · [三模式方案](design/agent-execution-technical-design.md)
 
-以“请计算 `(120+18)/3`”为例。模型可能直接回答；下面讨论它选择调用计算器的情况。
+ReAct 的关键是：模型根据当前历史选择工具，程序执行工具，再把观察交还模型。同一次用户请求可以经历多轮反馈。现在代码把“保存对话历史”和“执行一段反馈循环”分开，便于 P&E 的每个步骤复用循环。
+
+## 浏览器到 Session
+
+页面先通过 `GET /api/session` 创建对话。新对话模式为空，在对话框上方选择模式；首条 `POST /api/chat` 通过输入校验后，`Session.accept` 原子绑定模式和 Runner，创建 RunLease。当前 Session 已有运行时返回 409；已有模式与请求不同也返回 409。输入错误不会绑定模式。
+
+RunLease 持有本轮 requestId、请求快照、RunContext、事件通道和工具确认。异步流真正开始后进入 RUNNING，发出 run_started，再调用 Runner。结束时清理资源并释放所属 Session。若连接在异步任务启动前就结束，ACCEPTED 状态也能直接取消，不依赖尚未进入的执行方法的 finally。
+
+## Runner 保存历史，Engine 执行循环
+
+从 [ReActRunner.run](../src/main/java/dev/learning/agent/core/ReActRunner.java) 开始阅读：它复制会话历史，追加本轮用户问题，把这些消息和局部限额交给 [DefaultReActEngine.execute](../src/main/java/dev/learning/agent/core/DefaultReActEngine.java)。Engine 本身不保存会话历史。
 
 ```mermaid
 sequenceDiagram
-    actor User as 用户
-    participant Page as 浏览器
-    participant Controller as ChatController
-    participant Session as AgentSessions.Session
-    participant Loop as AgentLoop
-    participant Model as DeepSeek 客户端
-    participant Tools as ToolRegistry
-    User->>Page: 输入问题并发送
-    Page->>Controller: POST /api/chat，携带会话 ID
-    Controller->>Session: run(prompt, settings, sink)
-    Session->>Loop: run(prompt, settings)
-    Loop->>Loop: 保存 user 消息
-    Loop->>Model: 历史消息 + 工具定义
-    Model-->>Loop: calculator 调用及参数
-    Loop->>Tools: dispatch(toolCall)
-    Tools-->>Loop: 46
-    Loop->>Loop: 保存 assistant 调用和 tool 结果
-    Loop->>Model: 再次发送更新后的历史
-    Model-->>Page: 文本分片经事件流显示
-    Model-->>Loop: 完整回答，结束
+    participant S as Session / RunLease
+    participant R as ReActRunner
+    participant E as ReActEngine
+    participant M as ModelGateway
+    participant T as ToolExecutionService
+    S->>R: 本轮请求与共享 RunContext
+    R->>E: 历史、工具范围、局部限额
+    loop 最多 8 次模型请求
+        E->>M: 当前 transcript
+        M-->>E: 完整 AssistantTurn
+        alt 包含工具调用
+            E->>T: 逐个分发，保存证据
+            T-->>E: SUCCESS / ERROR / DENIED / SKIPPED 等结果
+            E->>R: 完整 assistant + 所有 tool 结果检查点
+        else 正常无工具响应
+            E->>R: 最终检查点和 EngineResult
+        end
+    end
+    R-->>S: RunResult 与本轮计数
 ```
 
-## 第一步：页面建立会话并发送消息
+模型调用经过 ModelGateway，统一计数、取消、结束原因校验和轨迹。工具经过 ToolExecutionService，先消费尝试额度，再校验和分发，记录实际是否执行与可分享证据。模型每次返回的工具定义受 allowedTools 限制，服务端分发时再次核对。
 
-[app.js](../src/main/resources/static/app.js) 加载时请求 `GET /api/session`，保存返回的 `sessionId`。发送消息时，浏览器请求 `POST /api/chat`，请求体包含 `prompt`、`model` 和 `reasoningLevel`，请求头 `X-Agent-Session` 用来找到对应的会话。
+## 完整检查点为什么重要
 
-[ChatController.chat](../src/main/java/dev/learning/agent/app/chat/ChatController.java) 检查请求来源、会话 ID、消息长度和模型设置，然后取得会话执行权。相同会话已经有请求在运行时，新请求返回 HTTP 409。结果通过 `StreamingResponseBody` 逐行写回浏览器。
+模型声明三个原生工具调用后，必须收到三个对应结果。即使只允许执行两个，也为第三个补 SKIPPED；原调用 ID 用于协议配对，宿主证据另有 E1、E2 等 ID。assistant 与全部结果作为一个批次保存，不能只保存半段往返。
 
-[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) 为每个会话创建一个 `AgentLoop` 和工具注册表。会话中的 `currentSink` 把本轮的文字、工具、轨迹和确认事件送给当前浏览器连接。
+```json
+{"evidenceId":"E1","status":"SUCCESS","content":"138","executed":true,"hasValue":true,"truncated":false}
+```
 
-## 第二步：AgentLoop 请求模型
+这是原生 tool 消息里的字符串内容。`executed` 与 `status` 是不同问题：Bash 已执行但输出未获分享时，状态为 DENIED、executed 为 true，内容只保留拒绝说明；成功缓存复用则 executed 为 false。
 
-打开 [AgentLoop.run](../src/main/java/dev/learning/agent/core/ReActRunner.java)，跟着这几个动作读：
+ReAct 保留完整历史，三个协议客户端负责转换，思考内容与 Anthropic blocks 也保留在完整 AssistantTurn 中。P&E 的局部步骤历史不进入会话历史；ReWOO/P&E 的跨轮记忆只保留有限的已完成问答对。
 
-1. 将用户消息追加到 `messages`，发出用户输入和模型设置的轨迹事件。
-2. 将当前历史和工具定义交给 `ChatModel.stream(...)`。客户端一边把文本片段交给页面，一边组装完整的 `AssistantTurn`。
-3. 记录模型完成或失败事件；模型返回思考内容时，也记录思考轨迹。
-4. 如果模型返回工具调用，先保存 assistant 消息，再按顺序执行工具，把每个结果以 tool 消息保存，随后继续请求模型。
-5. 如果没有工具调用且结束原因为 `stop`，保存最终回答并结束；异常结束或超出次数则报错。
+## 和其他两种模式的关系
 
-每个用户轮次最多发起 8 次模型请求，数值在 `AgentSessions` 创建 `AgentLoop` 时传入。限制的是模型请求次数，一个请求可能包含多个工具调用。
+ReWOO 不走 ReActEngine。Planner 产出静态工具计划，校验依赖后直接逐个执行，最后交给 Solver。中间工具失败不会触发模型重规划。
 
-## 第三步：工具是怎样执行的
+P&E 每个高层目标通过 StepExecutor 调用同一个 ReActEngine，但每次传入新 transcript、目标和工具范围，最多 3 次模型调用、2 次工具尝试，且不向页面发布内部步骤回答。各步骤共享外层 RunContext 的总预算和证据。外层 Replanner 决定继续、修订或结束，Finalizer 才生成用户回答。
 
-[AgentTool](../src/main/java/dev/learning/agent/tool/AgentTool.java) 定义工具需要提供的两项能力：向模型描述工具，以及根据参数执行工具。[ToolRegistry](../src/main/java/dev/learning/agent/tool/ToolRegistry.java) 按名称保存工具，收到调用后查找并执行。
-
-| 工具 | 参数示例 | 程序做什么 |
-| --- | --- | --- |
-| [calculator](../src/main/java/dev/learning/agent/tool/CalculatorTool.java) | `{"expression":"(120+18)/3"}` | 用解析器执行基本四则运算，返回 `46`。 |
-| [search](../src/main/java/dev/learning/agent/tool/SearchTool.java) | `{"query":"Java 17"}` | 使用 Exa 搜索，返回标题、链接和摘要；未配置 key 时返回错误文本。 |
-| [bash](../src/main/java/dev/learning/agent/tool/BashTool.java) | `{"command":"pwd"}` | 请求用户确认命令、运行命令，再请求用户确认是否分享输出。 |
-
-工具的参数错误、未知工具和部分执行错误会转成文本结果，让模型有机会根据错误继续处理。模型 HTTP 请求或流解析失败则会结束当前用户轮次，并显示错误。
-
-## 第四步：历史如何连接前后请求
-
-| 顺序 | 角色 | 内容示例 |
-| --- | --- | --- |
-| 1 | `system` | 说明如何使用工具及遵守确认规则。 |
-| 2 | `user` | 请计算 `(120+18)/3`。 |
-| 3 | `assistant` | 调用 `calculator`，附带调用 ID 和参数。 |
-| 4 | `tool` | 返回 `46`，用调用 ID 关联上一步。 |
-| 5 | `assistant` | 根据工具结果回答用户。 |
-
-这是 `AgentLoop` 使用的内部历史；各协议客户端会把它转换成接口需要的格式。开启思考时，模型实际返回的思考内容也会保存；Anthropic 客户端还保存原有内容块，以便后续请求回传。
-
-下一篇解释同一份历史怎样适配三种接口：[协议、流式输出和轨迹](03-protocols-and-streaming.md)。
+可运行 `mvn -Dtest=ReActRunnerTest,EngineBoundaryTest,RewooRunnerTest,PlanExecuteRunnerTest test`，用可控模型返回逐步观察执行差异；真实三协议结果见[实施验证](design/agent-execution-research.md#实施后验证2026-11-01)。

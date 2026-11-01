@@ -44,7 +44,7 @@ mvn -Dtest=ToolTranscriptExperimentTest,ReActRunnerTest test
 
 这样限制了实际执行次数，同时明确告诉模型第三个没有执行，不能声称得到了 `5`。在 Anthropic 原生格式中，未执行的调用应以对应的 `tool_result` 返回，并设置 `is_error: true`。[并行调用与跳过执行](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use)
 
-实验中的 Anthropic 适配器仍沿用项目现有的字符串错误观察，尚未建模 `is_error`；因此该实验验证的是结果配对，没有验证结构化错误标记。实验也没有修改实际 `AgentLoop` 的执行策略，应用目前仍按顺序执行模型返回的全部调用。
+实验中的 Anthropic 适配器仍沿用项目现有的字符串错误观察，尚未建模 `is_error`；因此该实验验证的是结果配对，没有验证结构化错误标记。实验记录的是改造前的配对行为。当前生产内核仍串行执行，但超过局部或全局预算时会为剩余调用补充结构化 SKIPPED 结果，保持完整配对。
 
 另一种策略是在执行任何工具之前拒绝整批调用。无论选哪种策略，都要明确区分“本批执行次数上限”和“整个用户轮次的总预算”：模型可能在下次请求里重新发起刚才未执行的调用。预算耗尽应报告未完成，不能当作成功。
 
@@ -194,4 +194,4 @@ python3 experiments/deepseek_tool_limit.py --protocol chat
 
 配对检查还可以发现漏回、重复回和陌生 ID。ID 本身不会执行这些检查，也不保证幂等执行；宿主仍需维护状态。并行执行的完成顺序可以不同，但发送给模型前仍要满足各 API 的消息分组和顺序要求。
 
-本项目已在 `ToolCall.id` 和 `ChatMessage.toolCallId` 中保存关联 ID，三个适配器分别映射到各自协议字段。`AgentLoop` 生成的 `tool-<requestId>-<序号>` 用于界面轨迹，它不是模型的工具调用 ID，不能拿来填写协议结果的关联字段。
+本项目已在 `ToolCall.id` 和 `ChatMessage.toolCallId` 中保存关联 ID，三个适配器分别映射到各自协议字段。`DefaultToolExecutionService` 生成的 `tool-<requestId>-<序号>` 用于界面轨迹，它不是模型的工具调用 ID，不能拿来填写协议结果的关联字段。

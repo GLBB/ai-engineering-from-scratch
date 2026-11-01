@@ -1,10 +1,10 @@
 # Agent 三模式技术方案 v1
 
-日期：2026-11-01（Asia/Shanghai） · 状态：待实施，运行代码尚未修改
+日期：2026-11-01（Asia/Shanghai） · 状态：T1–T5 已实现；18 组真实接口固定算术验收通过
 
 [项目](../../README.md) · [研究证据](agent-execution-research.md) · [界面示意](figures/execution-modes-ui.svg)
 
-本文是 ReAct、ReWOO、Plan-and-Execute 的统一开发依据，确定类边界、接口、状态转移、执行算法、改造顺序与验收用例。代码块中的 Java 类型是目标契约；算法标为伪代码，不表示功能已经实现。
+本文是 ReAct、ReWOO、Plan-and-Execute 的统一开发依据，确定类边界、接口、状态转移、执行算法、改造顺序与验收用例。代码块说明接口与算法；当前实现已覆盖三模式，验收结果与仍需扩展的样例见第 14–15 节及研究记录。
 
 阅读时先沿第 3 节理解一次请求怎样流动，再看第 5 节的对话与运行管理，以及第 7–9 节的三种执行流程。第 4 节完整类型签名用于实现时查阅；理解主线后再展开，不需要先记住所有类名。
 
@@ -36,9 +36,9 @@
 
 P&E 的内部计划可以变，所属对话的模式不变。Plan-and-Execute 的高层步骤执行与重规划变体依据见[研究记录](agent-execution-research.md)；不把“ReWOO 加一次失败重试”作为第三种模式的实现。
 
-## 3. 当前代码与目标调用链
+## 3. 改造动机与当前调用链
 
-当前链路为 `ChatController → Session.run → AgentLoop.run → ChatModel / ToolRegistry`。用户发来一条消息，Session 找到自己的 AgentLoop；循环请求模型，执行模型提出的工具调用，再把结果送回模型，直到本轮结束。这已经是一套可运行的 ReAct 实现。
+改造前链路为 `ChatController → Session.run → AgentLoop.run → ChatModel / ToolRegistry`。用户发来一条消息，Session 找到自己的 AgentLoop；循环请求模型，执行模型提出的工具调用，再把结果送回模型，直到本轮结束。这已经是一套可运行的 ReAct 实现。
 
 增加另外两种模式后，变化主要在“谁决定下一步、何时再次请求模型”。例如同样要求先算 `120+18`，再除以三：
 
@@ -247,7 +247,7 @@ stateDiagram-v2
 
 NEW 的 mode 为 null。IDLE 和 RUNNING 的 mode 永不改变；新建对话创建另一个 Session，而不是把原 Session 重置为 NEW。
 
-同一个 Session 串行执行，是因为它持有一份对话历史、一个当前输出通道 currentSink 和一个等待确认的操作。两个请求同时运行，会交叉追加历史，把输出发送到被另一个请求覆盖的通道，并争用工具确认。即使把历史列表换成线程安全集合，也没有定义两条执行分支应怎样合并。当前 demo 的 Session.begin 已用 running 防止这种并发；本方案延续这条规则。
+同一个 Session 串行执行，是因为同一 Runner 持有一份需要按顺序更新的对话历史与运行策略。改造前还共享 currentSink 和等待确认的操作；两个请求同时运行时，既会交叉追加历史，也会覆盖输出通道、争用工具确认。当前 RunLease 已把事件和确认分给各次请求，但同一会话历史仍需要串行推进。即使把历史列表换成线程安全集合，也没有定义两条执行分支应怎样合并。改造前的 Session.begin 已用 running 防止这种并发；现在 accept 与 RunLease 延续并补齐这条规则。
 
 不同 Session 可以分别执行；如果将来要让同一对话并发，需要另外设计分支历史、独立输出与确认、结果合并规则。P&E 在一个请求内部执行多个步骤，仍占用同一个 Session，不等于接收了多个并发用户请求。
 
@@ -255,8 +255,8 @@ Session 替换 `begin()` / `run(String, ModelSettings, EventSink)`，对外提�
 
 | 方法 | 契约 |
 | --- | --- |
-| `synchronized RunLease accept(ValidatedPrompt prompt)` | 校验状态、选择或核对模式、创建唯一 runner、建立 activeRun，原子完成 |
-| `RunResult execute(RunLease lease, RunEvents events)` | 校验 lease 所属关系，执行 runner；finally 清理确认、事件通道和 activeRun |
+| `synchronized RunLease accept(String prompt, ModelSettings settings, AgentMode requested)` | 校验状态、选择或核对模式、创建唯一 runner、建立 activeRun，原子完成 |
+| `RunResult execute(RunLease lease, EventSink events)` | 校验 lease 所属关系，执行 runner；finally 清理确认、事件通道和 activeRun |
 | `synchronized SessionStatus status()` | 返回 mode、modeLocked、running、activeRequestId |
 | `boolean decide(String approvalId, boolean approved)` | 沿用当前确认入口；仅针对当前 activeRun 的有效确认 |
 
@@ -482,7 +482,7 @@ execute(engineRequest, context):
 | `EvidenceBinder.bind(ToolInput, EvidenceStore)` | 模板参数 → 已绑定参数；失败抛出带节点原因的验证异常 |
 | `RewooSolver.solve(TaskInput, ValidatedRewooPlan, List<Evidence>, RunContext)` | → 完整最终 AssistantTurn，文本可流式显示 |
 
-TaskInput 包含本轮原问题和固定的历史快照。所有方法的模型 I/O 统一抛 IOException / InterruptedException，解析与计划验证用带 code、stepId、field 的 PlanValidationException。
+TaskInput 包含本轮原问题和固定的历史快照。所有方法的模型 I/O 统一抛 IOException / InterruptedException，解析与计划验证使用 IOException / PlanValidationException 描述失败原因；HTTP 错误码由 Controller 统一包装。
 
 ### 8.2 解析、校验和绑定
 
@@ -631,7 +631,7 @@ P&E 的 35=初始规划 1+最多 8×3 次步骤模型+最多 8 次 review+Finali
 
 HTTP 断连或超时先交给第 5.3 节的 RunLease，它通知本轮 RunControl。RunControl 再让具体客户端和工具停止阻塞；执行线程完成清理后，RunLease 才释放 Session。下面列的是实际停止资源的位置，不能只修改一个取消标记就认为操作已经结束。
 
-DefaultRunControl 使用 System.nanoTime 截止时间和取消原因；onCancel 注册资源关闭动作，返回值 close 只注销该动作。单个 ScheduledExecutorService 调度超时，bean 销毁时关闭调度器。
+DefaultRunControl 使用 System.nanoTime 截止时间和取消原因；onCancel 注册资源关闭动作，返回值 close 只注销该动作。进程内单个守护线程调度超时，每个 run 结束取消自己的定时任务；调度线程随 JVM 退出。
 
 预算计数器以同步方法或原子更新保护。transcript、证据与计划版本只由当前执行线程写入；计时线程只设置取消信号和关闭资源，不直接改写业务状态。NDJSON 的序列化与写出保持单一顺序，失败只触发幂等取消。
 
@@ -689,11 +689,11 @@ ChatRequest 增加 `forModel(ModelRequest)`，现有 forAgent 的参数填充合
 
 ### 12.1 前端状态
 
-新增纯状态模块 `static/conversation-state.js`，只管理 sessionId、mode、modeLocked、running 和 activeRequestId，便于 Node 标准测试器验证。app.js 继续负责 DOM 与 fetch，trace.js 继续显示轨迹。
+新增纯状态模块 `static/conversation-state.js`，只管理 mode、modeLocked、running 和 activeRequestId；sessionId 由 app.js 持有，便于 Node 标准测试器验证。app.js 继续负责 DOM 与 fetch，trace.js 继续显示轨迹。
 
 布局顺序为：页面标题 → 对话/轨迹导航 → 独立执行模式栏 → 对话内容或轨迹 → 消息输入区。模式选择和只读展示使用同一位置，放在对话框上方；切换对话/轨迹视图时仍然可见。消息输入区只保留文本输入、模型、推理等级与发送按钮。
 
-index.html 在导航后、conversation 与 trace-view 之前新增 `section#execution-mode-bar`，内部包含带可见标签的 `select#execution-mode-select` 和只读 `span#execution-mode-label`。NEW 时只显示 select，锁定后只显示 span；app.js 更新同一栏，不把模式控件移入 composer 或设置弹窗。窄屏下允许该栏换行，完整显示 Plan-and-Execute。
+index.html 在导航后、conversation 与 trace-view 之前新增 `section.mode-bar`，内部包含带可见标签的 `select#mode-select` 和只读 `strong#current-mode`。NEW 时只显示 select，锁定后只显示 strong；app.js 更新同一栏，不把模式控件移入 composer 或设置弹窗。窄屏下允许该栏换行，完整显示 Plan-and-Execute。
 
 | 时点 | 模式控件 | 模型/推理等级 |
 | --- | --- | --- |
@@ -705,25 +705,24 @@ index.html 在导航后、conversation 与 trace-view 之前新增 `section#exec
 | 首条请求网络异常 | 查询 session/status；查询失败保持待确认状态 | 等状态明确后恢复 |
 | 新对话 | 调用创建接口，替换 sessionId、清空当前视图 | 恢复选择 |
 
-本地偏好键 `agent.executionMode.v1` 仅在服务端确认后写入；未知值退回 REACT。设置弹窗只保留协议和作用域说明，不出现第二个模式选择入口。
+本地偏好键 `agent-mode` 仅在服务端确认后写入；未知值退回 REACT。设置弹窗只保留协议和作用域说明，不出现第二个模式选择入口。
 
 ### 12.2 事件契约
 
-外层为 NDJSON `ChatEvent(UUID requestId, String type, Object data)`，在现有包装上增加顶层 requestId；业务 data 使用具体 record 实现 AgentEvent，Object 只允许存在于最终序列化包装层。RunEvents 绑定当前 requestId，前端按顶层 ID 忽略迟到事件。text 仍使用字符串 data，done 仍使用空字符串，以减少现有显示逻辑的改动。
+外层为 NDJSON `ChatEvent(UUID requestId, String type, Object data)`，在现有包装上增加顶层 requestId；业务 data 使用具体 record，RuntimeEvent 实现 AgentEvent；Object 只存在于最终事件序列化包装层。RunEvents 绑定当前 requestId，前端按顶层 ID 忽略迟到事件。text 仍使用字符串 data，done 仍使用空字符串，以减少现有显示逻辑的改动。
 
 | type | data 的固定关键字段 |
 | --- | --- |
-| run_started | mode、modeLocked=true |
+| run_started | requestId、mode、modeLocked=true |
 | phase | phase、status、stepId、revision |
 | plan | mode、revision、plan（模式专属类型） |
 | evidence | Evidence 本身 |
-| step_result | stepId、revision、result（StepResult） |
-| replan_decision | revision、decision、reason |
-| plan_revised | 旧/新 revision、保留/替换/新增步骤、新计划 |
+| step_result | StepResult 本身；stepId 关联所在计划 |
+| decision | 四种 ReplanDecision 之一，含 reason；新版本再发 plan |
 | trace | 现有 TraceEvent 字段，加 requestId、mode、phase、stepId、revision |
 | text | 最外层用户回答分片；ReAct 沿用现有显示，另外两种仅最终汇总 |
 | approval | 现有确认信息，加 stepId；内容只用于本地确认 |
-| run_result | mode、result（RunResult） |
+| run_result | RunResult 本身；mode 来自 run_started |
 | done / error | 保留现有传输终态；error 加 code 和 message |
 
 正常或业务不足的顺序为 run_started → 阶段事件 → run_result → done。运行时异常为 run_started → 可选 run_result → error；之后不再发送 done。连接已断时仅做后端清理。done 只表示事件流正常终止。
@@ -760,7 +759,7 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 | app/chat/ChatController.java | 修改 | 新请求 DTO、状态接口、run_started、终态与异步清理 |
 | app/chat/RunLease.java / AgentRunInterceptor.java | 新增 | 接受/运行/关闭生命周期与取消 |
 | app/chat/BrowserApproval.java | 修改 | 实现 ApprovalGateway；绑定 requestId、超时受剩余时间限制 |
-| app/chat/ApiExceptionHandler.java | 新增 | 稳定的 JSON 错误码与 body |
+| app/chat/ChatErrors.java / ApiFailure.java | 新增 | 稳定的 JSON 错误码与 body |
 | app/settings/ | 保留既有职责 | 不写入模式或本轮预算 |
 | tool/AgentTool.java / ToolRegistry.java | 修改 | typed ToolInput、结构化 ToolResult、参数解码与目录 |
 | tool/ 三个具体工具 | 修改 | 状态、执行标记、取消；Bash 拒绝分享不外泄输出 |
@@ -771,20 +770,24 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 | static/index.html / app.css / app.js | 修改 | 对话框上方独立模式栏、新对话三选一与原位只读展示、计划卡、状态恢复 |
 | static/conversation-state.js | 新增 | 纯状态转换与事件归属检查 |
 | static/trace.js | 修改 | revision、步骤关联、按实际状态/计数展示 |
-| prompts/ 下 7 个文本文件 | 新增 | rewoo-planner、rewoo-solver、json-repair；plan-execute-planner、step、review、finalizer，均以 .txt 结尾 |
+| prompts/ 下 7 个文本文件 | 新增 | rewoo-planner、rewoo-solver、json-repair；goal-planner、step-executor、replanner、plan-finalizer，均以 .txt 结尾 |
 | README 与 docs/01–06 | 随实现更新 | 只描述已经实现并验收的行为 |
 
 提示词资源位于 `src/main/resources/prompts/`，代码填充带标签的任务、工具和证据数据；明确角色、输出契约与规则，外部内容不获得执行授权。修复提示只处理格式，不假冒工具执行记录。
 
 ## 14. 分步实施、测试与验收
 
+T1–T5 的代码与本地测试已完成；T6 已完成三模式 × 三协议 × Off/Low 的 18 组真实算术样例，并完成 Chromium 页面验证。计数、耗时、usage 和范围限制见[实施验证](agent-execution-research.md#实施后验证2026-11-01)。下表保留原实施拆分，便于按提交阅读。
+
+具体实现用 `ModelJson` 共用纯 JSON 请求与一次格式修复，`GoalPlans` 合并 P&E 的解析、图校验及决策解码；Planner/Replanner/Finalizer 的单次请求由 Runner 调用这些函数，不另建只有转发方法的包装类。逻辑职责仍按第 8–9 节划分。
+
 | 提交阶段 | 代码范围 | 必须通过的测试与退出条件 |
 | --- | --- | --- |
 | T1：新增共享基础类型 | ModelRequest、ToolResult、预算/取消与证据实现；暂不切换现有调用入口 | 新的 Budget/Control/Evidence 测试通过，旧 48 项行为仍可执行 |
-| T2：原子迁移 ReAct 主链 | 新 ChatModel 与工具接口、三个客户端、ReActEngine/Runner、现有 Session 的最小 ReAct 适配 | AgentLoopTest 迁为 ReActEngineTest + ReActRunnerTest；协议/工具测试同步迁移，覆盖两次拒绝、非零退出、超时与历史检查点；整个项目编译通过 |
-| T3：ReWOO | 计划、校验、绑定、串行 Worker、Solver | RewooPlanTest、EvidenceBinderTest、RewooRunnerTest：乱序、环、缺引用、E1/E10、失败分支与独立分支、格式修复上限 |
-| T4：P&E | 高层计划、步骤、review、修订、最终汇总 | PlanExecuteRunnerTest、StepExecutorTest：正常继续、有界修订、保留成功证据、拒绝提前完成、跨版本预算不重置 |
-| T5：对话与前端 | mode 绑定、RunLease、状态接口、计划显示 | SessionModeTest、ChatControllerTest、RunLeaseTest、BrowserApprovalTest；Node 状态测试；三模式新对话选择与锁定的浏览器验收 |
+| T2：原子迁移 ReAct 主链 | 新 ChatModel 与工具接口、三个客户端、ReActEngine/Runner、现有 Session 的最小 ReAct 适配 | AgentLoopTest 迁为 ReActRunnerTest，并增加 EngineBoundaryTest；协议/工具测试同步迁移，覆盖两次拒绝、非零退出、超时与历史检查点；整个项目编译通过 |
+| T3：ReWOO | 计划、校验、绑定、串行 Worker、Solver | RewooRunnerTest：乱序、环、缺引用、E1/E10、失败分支与独立分支、格式修复上限 |
+| T4：P&E | 高层计划、步骤、review、修订、最终汇总 | PlanExecuteRunnerTest：正常继续、有界修订、保留成功证据、拒绝提前完成、跨版本预算不重置 |
+| T5：对话与前端 | mode 绑定、RunLease、状态接口、计划显示 | ChatControllerTest、RunLeaseTest、BrowserApprovalTest；Node 状态测试；三模式新对话选择与锁定的浏览器验收 |
 | T6：真实矩阵 | 三模式 × 三协议，Off/非 Off | 相同任务与完成标准记录质量、调用、工具执行、耗时与实际 usage；未覆盖组合明确列出 |
 
 新增关键断言：
@@ -805,13 +808,13 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 mvn test
 ```
 
-从项目根目录执行拟新增的纯前端状态测试：
+从项目根目录执行纯前端状态测试：
 
 ```bash
-node --test src/test/js/conversation-state.test.cjs
+node --test src/test/js/*.test.js
 ```
 
-至少保留当前已有 48 项测试的行为覆盖；可以迁移、重命名和重构断言，不将新测试数与旧测试数机械相加。该 48 项是研究阶段的既有基线，不代表本技术方案已经实施或本轮重新运行了测试。
+至少保留当前已有 48 项测试的行为覆盖；可以迁移、重命名和重构断言，不将新测试数与旧测试数机械相加。该 48 项是研究阶段的既有基线；当前测试数量与本轮真实 API 结果见[实施验证](agent-execution-research.md#实施后验证2026-11-01)。
 
 每个提交阶段结束都要求项目可编译、测试可运行。T1 的新类型是增量添加；T2 一次迁完生产调用者和测试替身，避免将“接口已经改了但旧循环尚未迁移”的中间状态作为独立提交。
 
@@ -819,4 +822,4 @@ node --test src/test/js/conversation-state.test.cjs
 
 接口、模式锁定、串行调度、局部/全局预算、取消资源和测试映射由本文确定。真实模型能否稳定输出合法计划、步骤完成判断的质量、token 与端到端成本必须通过 T6 验证。
 
-三模式在固定模型下各有代价，P&E 可以因步骤内与执行后调用更多而更慢、更贵；验收只在相同完成标准下比较。运行代码实施前，研究记录与方案不得被标为已完成功能。
+三模式在固定模型下各有代价，P&E 可以因步骤内与执行后调用更多而更慢、更贵；验收只在相同完成标准下比较。本轮 18 组只使用相同的两步算术任务。搜索质量、Bash 真实交互、开放式复杂任务与稳定性统计仍需扩展，不能据此推断普遍质量或成本优势。
