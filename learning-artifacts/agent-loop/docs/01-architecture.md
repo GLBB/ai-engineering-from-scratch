@@ -36,11 +36,11 @@ flowchart LR
 | [app](../src/main/java/dev/learning/agent/app/) | 启动服务、接收页面请求、管理会话和设置。 | [WebMain](../src/main/java/dev/learning/agent/app/WebMain.java) |
 | [app/chat](../src/main/java/dev/learning/agent/app/chat/) | 聊天接口、每个页面的会话以及 Bash 确认。 | [ChatController](../src/main/java/dev/learning/agent/app/chat/ChatController.java)、[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) |
 | [app/settings](../src/main/java/dev/learning/agent/app/settings/) | 读取、保存 API 协议设置。 | [SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) |
-| [core](../src/main/java/dev/learning/agent/core/) | 维护历史、调用模型、分发工具、产生轨迹。 | [AgentLoop](../src/main/java/dev/learning/agent/core/AgentLoop.java) |
+| [core](../src/main/java/dev/learning/agent/core/) | 维护历史、调用模型、分发工具、产生轨迹。 | [AgentLoop](../src/main/java/dev/learning/agent/core/ReActRunner.java) |
 | [deepseek](../src/main/java/dev/learning/agent/deepseek/) | 将历史和工具转换为具体协议，读取模型流式响应。 | [ChatModel](../src/main/java/dev/learning/agent/core/ChatModel.java) 和三个客户端 |
 | [tool](../src/main/java/dev/learning/agent/tool/) | 工具定义、注册和实际执行。 | [ToolRegistry](../src/main/java/dev/learning/agent/tool/ToolRegistry.java) |
 | [static](../src/main/resources/static/) | HTML、样式、聊天交互和轨迹渲染。 | [app.js](../src/main/resources/static/app.js)、[trace.js](../src/main/resources/static/trace.js) |
-| [tests](../src/test/java/dev/learning/agent/) | 验证循环、协议、接口、工具和确认逻辑。 | [AgentLoopTraceTest](../src/test/java/dev/learning/agent/core/AgentLoopTraceTest.java) |
+| [tests](../src/test/java/dev/learning/agent/) | 验证循环、协议、接口、工具和确认逻辑。 | [ReActRunnerTraceTest](../src/test/java/dev/learning/agent/core/ReActRunnerTraceTest.java) |
 
 ## 进程中保存了什么
 

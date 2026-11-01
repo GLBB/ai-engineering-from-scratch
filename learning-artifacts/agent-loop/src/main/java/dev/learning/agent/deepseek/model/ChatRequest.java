@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import dev.learning.agent.core.ModelRequest;
+import dev.learning.agent.core.OutputMode;
 
 /**
  * DeepSeek Chat Completions 请求体。字段以官方文档为准；未设置的可选字段不会发出。
@@ -62,6 +64,20 @@ public final class ChatRequest {
         request.stream = true;
         request.tools = List.copyOf(tools);
         request.toolChoice = "auto";
+        return request;
+    }
+
+    public static ChatRequest forModel(ModelRequest modelRequest) {
+        ChatRequest request = forAgent(modelRequest.settings(), modelRequest.messages(), modelRequest.tools());
+        request.maxTokens = modelRequest.maxOutputTokens();
+        request.streamOptions = new StreamOptions(true);
+        if (modelRequest.tools().isEmpty()) {
+            request.tools = null;
+            request.toolChoice = null;
+        }
+        if (modelRequest.outputMode() == OutputMode.JSON_OBJECT) {
+            request.responseFormat = new ResponseFormat("json_object");
+        }
         return request;
     }
 

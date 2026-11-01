@@ -23,6 +23,7 @@ public final class ToolRegistry {
     }
 
     public List<ToolSpec> definitions() { return tools.values().stream().map(AgentTool::definition).toList(); }
+    public AgentTool find(String name) { return tools.get(name); }
 
     public String dispatch(ToolCall call) {
         AgentTool tool = tools.get(call.function().name());

@@ -3,7 +3,7 @@ package dev.learning.agent.app.chat;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.app.settings.SettingsStore;
-import dev.learning.agent.core.AgentLoop;
+import dev.learning.agent.core.*;
 import dev.learning.agent.deepseek.ChatCompletionsClient;
 import dev.learning.agent.deepseek.ResponsesClient;
 import dev.learning.agent.deepseek.AnthropicClient;
@@ -63,17 +63,15 @@ final class AgentSessions {
         private final AtomicBoolean running = new AtomicBoolean();
         private final AtomicReference<EventSink> currentSink = new AtomicReference<>();
         private final BrowserApproval approvals = new BrowserApproval(this::emit);
-        private final AgentLoop loop;
+        private final ReActRunner loop;
+        private final ToolRegistry tools;
 
         private Session() {
-            ToolRegistry tools = new ToolRegistry();
+            tools = new ToolRegistry();
             tools.register(new CalculatorTool(json));
             tools.register(new BashTool(json, projectRoot, approvals::approveCommand, approvals::approveOutput));
             tools.register(new SearchTool(json, exaKey));
-            loop = new AgentLoop(client, tools, 8,
-                    delta -> emit("text", delta),
-                    event -> emit("tool", event),
-                    event -> emit("trace", event));
+            loop = new ReActRunner(new DefaultReActEngine(tools));
         }
 
         String id() {
@@ -87,7 +85,17 @@ final class AgentSessions {
         void run(String prompt, ModelSettings settings, EventSink sink) throws Exception {
             currentSink.set(sink);
             try {
-                loop.run(prompt, settings);
+                UUID requestId = UUID.randomUUID();
+                RunContext context = RunContexts.create(requestId, AgentMode.REACT, client, tools,
+                        event -> {
+                            RuntimeEvent transport = (RuntimeEvent) event;
+                            emit(transport.type(), transport.data());
+                        }, (kind, content, scope, control) -> "command".equals(kind)
+                                ? approvals.approveCommand(content) : approvals.approveOutput(content));
+                try {
+                    RunResult result = loop.run(new ExecutionRequest(requestId, prompt, settings), context);
+                    if (result.status() != ExecutionStatus.COMPLETE) throw new java.io.IOException(result.answer());
+                } finally { context.control().close(); }
             } finally {
                 approvals.cancel();
                 currentSink.set(null);

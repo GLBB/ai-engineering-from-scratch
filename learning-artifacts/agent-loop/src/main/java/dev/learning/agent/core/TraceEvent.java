@@ -12,7 +12,22 @@ public record TraceEvent(
         long durationMs,
         String label,
         String input,
-        String output) {
+        String output, String requestId, AgentMode mode, String phase, String stepId, int revision, dev.learning.agent.deepseek.model.TokenUsage usage) {
+
+    public TraceEvent(String id, String kind, String status, int round, long startedAtMs,
+                      long durationMs, String label, String input, String output) {
+        this(id, kind, status, round, startedAtMs, durationMs, label, input, output, null, null, null, null, 0, null);
+    }
+
+    public TraceEvent scoped(String requestId, AgentMode mode, RunScope scope) {
+        return new TraceEvent(id, kind, status, round, startedAtMs, durationMs, label, input, output,
+                requestId, mode, scope.phase(), scope.stepId(), scope.revision(), usage);
+    }
+
+    public TraceEvent withUsage(dev.learning.agent.deepseek.model.TokenUsage value) {
+        return new TraceEvent(id, kind, status, round, startedAtMs, durationMs, label, input, output,
+                requestId, mode, phase, stepId, revision, value);
+    }
 
     public static TraceEvent user(String id, String prompt, long atMs) {
         return new TraceEvent(id, "user", "complete", 0, atMs, 0, "用户输入", prompt, null);

@@ -5,6 +5,7 @@ import dev.learning.agent.deepseek.model.ToolSpec.FunctionSpec;
 import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.learning.agent.core.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,14 +37,14 @@ public final class BashTool implements AgentTool {
                 ParameterSchema.oneString("command", "The Bash command to run.")));
     }
 
-    public String execute(String arguments) throws Exception {
-        BashArgs args = json.readValue(arguments, BashArgs.class);
+    public ToolResult execute(ToolInput input, RunScope scope, RunContext context) throws Exception {
+        if (!(input instanceof BashInput args)) throw new IllegalArgumentException("expected bash arguments");
         String command = args.command();
         if (command == null || command.isBlank() || command.length() > 2_000)
-            return "error: command is missing or too long";
-        if (!approve.test(command)) {
+            throw new IllegalArgumentException("command is missing or too long");
+        if (!(context == null ? approve.test(command) : context.approvals().approve("command", command, scope, context.control()))) {
             LOG.info("Bash command declined; chars={}", command.length());
-            return "error: user declined Bash command";
+            return new ToolResult(ToolStatus.DENIED, "user declined Bash command", "COMMAND_DENIED", false, false, false);
         }
         LOG.info("Bash command approved; chars={}", command.length());
 
@@ -52,25 +53,42 @@ public final class BashTool implements AgentTool {
         builder.environment().remove("DEEPSEEK_API_KEY");
         builder.environment().remove("EXA_AI_KEY");
         builder.environment().remove("EXA_API_KEY");
+        if (context != null) context.control().check();
         Process process = builder.start();
+        AutoCloseable cancellation = context == null ? () -> {} : context.control().onCancel(() -> stop(process));
         CapturedOutput output = new CapturedOutput();
         Thread reader = new Thread(() -> output.drain(process), "bash-output-reader");
         reader.setDaemon(true);
         reader.start();
         long start = System.nanoTime();
-        boolean finished = process.waitFor(15, TimeUnit.SECONDS);
-        if (!finished) process.destroyForcibly();
-        reader.join(2_000);
+        boolean finished;
+        try {
+            long waitMs = context == null ? 15_000 : Math.min(15_000, Math.max(1, context.control().remaining().toMillis()));
+            finished = process.waitFor(waitMs, TimeUnit.MILLISECONDS);
+            if (!finished) stop(process);
+            reader.join(2_000);
+            if (context != null) context.control().check();
+        } finally {
+            cancellation.close();
+            if (process.isAlive()) stop(process);
+        }
         String result = "exit=" + (finished ? process.exitValue() : "timeout") + "\n" + output.text();
         LOG.info("Bash process finished; status={}; elapsed={} ms; output chars={}",
                 finished ? process.exitValue() : "timeout", (System.nanoTime() - start) / 1_000_000,
                 result.length());
-        if (!approveOutput.test(result)) {
+        if (!(context == null ? approveOutput.test(result) : context.approvals().approve("output", result, scope, context.control()))) {
             LOG.info("Bash output sharing declined");
-            return "error: user declined sharing Bash output";
+            return new ToolResult(ToolStatus.DENIED, "user declined sharing Bash output", "OUTPUT_DENIED", true, false, false);
         }
         LOG.info("Bash output sharing approved");
-        return result;
+        ToolStatus status = !finished ? ToolStatus.TIMEOUT : process.exitValue() == 0 ? ToolStatus.SUCCESS : ToolStatus.ERROR;
+        return new ToolResult(status, result, status == ToolStatus.SUCCESS ? null : "BASH_FAILED", true,
+                status == ToolStatus.SUCCESS, output.truncated);
+    }
+
+    private static void stop(Process process) {
+        process.descendants().forEach(child -> { if (child.isAlive()) child.destroyForcibly(); });
+        process.destroyForcibly();
     }
 
     record BashArgs(String command) {}

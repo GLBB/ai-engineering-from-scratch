@@ -10,7 +10,7 @@
 
 [三种协议图解](docs/06-three-protocols-by-example.md) 用同一次真实计算对话，逐项标注规则、用户、助手、工具结果和宿主程序，展示完整请求与响应，并解释 developer 与思考内容的归属。
 
-[工具调用实验](docs/05-tool-calls-and-transcripts.md) 对比少回一个结果、执行上限和倒序返回三个场景，并梳理 Chat Completions、Responses、Anthropic Messages 与 Bedrock Converse 的对话记录。实验无需 API key，在本目录运行 `mvn -Dtest=ToolTranscriptExperimentTest,AgentLoopTest test`，可在 `target/tool-transcript-experiment/` 查看生成的请求 JSON。
+[工具调用实验](docs/05-tool-calls-and-transcripts.md) 对比少回一个结果、执行上限和倒序返回三个场景，并梳理 Chat Completions、Responses、Anthropic Messages 与 Bedrock Converse 的对话记录。实验无需 API key，在本目录运行 `mvn -Dtest=ToolTranscriptExperimentTest,ReActRunnerTest test`，可在 `target/tool-transcript-experiment/` 查看生成的请求 JSON。
 
 同一文档也记录了 2026-11-01 的 DeepSeek 真实 API 对照实验：三个兼容接口在缺少第三个结果时均返回 HTTP 400，补上未执行错误后均返回 HTTP 200。已设置 `DEEPSEEK_API_KEY` 时，可用 `python3 experiments/deepseek_tool_limit.py --protocol chat` 复现真实请求。
 
@@ -76,7 +76,7 @@ flowchart TD
 | [`app/LocalRequest.java`](src/main/java/dev/learning/agent/app/LocalRequest.java) | 检查本地请求的主机和来源。 |
 | [`core/TraceEvent.java`](src/main/java/dev/learning/agent/core/TraceEvent.java) | 定义模型、工具和助手步骤的轨迹事件。 |
 | [`static/`](src/main/resources/static/) | 浏览器页面、样式和交互脚本。 |
-| [`core/AgentLoop.java`](src/main/java/dev/learning/agent/core/AgentLoop.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
+| [`core/AgentLoop.java`](src/main/java/dev/learning/agent/core/ReActRunner.java) | 维护消息历史，决定继续调用工具、结束或报错。 |
 | [`deepseek/ChatCompletionsClient.java`](src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) | 处理 Chat Completions 请求和流式响应。 |
 | [`deepseek/ResponsesClient.java`](src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | 处理 Responses 请求、历史消息和流式事件。 |
 | [`deepseek/AnthropicClient.java`](src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | 处理 Anthropic 内容块、工具结果和流式事件。 |
@@ -87,11 +87,15 @@ flowchart TD
 
 上述 Java 路径的共同前缀是 `src/main/java/dev/learning/agent/`。JSON 通过 Jackson 转换为明确的 Java 类型；业务代码通过 SLF4J 记录日志，由 Logback 输出。
 
+## 执行内核改造
+
+现有 ReAct 已拆成 `ReActRunner`（会话历史）和 `DefaultReActEngine`（模型与工具反馈循环）。`DefaultModelGateway` 统一模型调用、预算与轨迹，`DefaultToolExecutionService` 保存结构化证据；三个协议客户端支持纯文本请求与明确输出上限。工具结果通过调用 ID 配对，并包含宿主证据 ID 和状态。ReWOO、Plan-and-Execute 与模式选择在后续步骤接入。
+
 ## 设计思路
 
 Agent 循环可以理解为：**把当前消息交给模型 → 按模型请求执行工具 → 把结果作为新消息交还模型 → 重复，直到得到最终回答**。
 
-阅读 `AgentLoop` 时，从 `run` 看整体流程：请求模型、校验结束原因、保存回复，再决定结束或执行工具。`startRequest` 初始化本次请求，`requestModel` 负责模型调用及其开始、完成和失败轨迹，`traceAnswer` 记录思考和回答，`validateFinishReason` 校验结束原因，`executeTool` 执行单个工具并记录轨迹与结果。
+从 `ReActRunner.run` 看历史与任务入口，再读 `DefaultReActEngine.execute` 的循环。模型请求与完成轨迹位于 `DefaultModelGateway.call`，工具状态、证据与配对结果位于 `DefaultToolExecutionService`。
 
 1. **模型决定，程序执行。** 模型返回工具名称和 JSON 参数；`ToolRegistry` 按名称查找 `AgentTool`，由 Java 实际执行。工具定义包含名称、描述和参数 Schema，随请求一起发送给模型。
 2. **消息历史连接各轮。** `system` 提供行为指引，`user` 保存问题，`assistant` 保存模型回复或工具调用，`tool` 保存执行结果。工具结果通过 `tool_call_id` 对应具体调用。Think 开启且请求携带工具时，模型返回的 `reasoning_content` 也保存在对应的 assistant 消息中，并随下次请求发回 DeepSeek。

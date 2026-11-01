@@ -38,7 +38,7 @@ sequenceDiagram
 
 ## 第二步：AgentLoop 请求模型
 
-打开 [AgentLoop.run](../src/main/java/dev/learning/agent/core/AgentLoop.java)，跟着这几个动作读：
+打开 [AgentLoop.run](../src/main/java/dev/learning/agent/core/ReActRunner.java)，跟着这几个动作读：
 
 1. 将用户消息追加到 `messages`，发出用户输入和模型设置的轨迹事件。
 2. 将当前历史和工具定义交给 `ChatModel.stream(...)`。客户端一边把文本片段交给页面，一边组装完整的 `AssistantTurn`。

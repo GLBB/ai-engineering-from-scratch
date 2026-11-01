@@ -5,6 +5,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.core.ChatModel;
+import dev.learning.agent.deepseek.model.TokenUsage;
+import dev.learning.agent.deepseek.model.ProviderUsage;
+import dev.learning.agent.core.ModelRequest;
+import dev.learning.agent.core.RunControl;
+import dev.learning.agent.core.ModelUse;
+import dev.learning.agent.core.OutputMode;
 import dev.learning.agent.deepseek.model.AssistantTurn;
 import dev.learning.agent.deepseek.model.ChatMessage;
 import dev.learning.agent.deepseek.model.ModelSettings;
@@ -31,15 +37,21 @@ public final class ResponsesClient implements ChatModel {
     public String protocol() { return "Responses"; }
 
     @Override
-    public AssistantTurn stream(List<ChatMessage> messages, List<ToolSpec> tools,
-                                Consumer<String> onText, ModelSettings settings)
+    public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control)
             throws IOException, InterruptedException {
-        try (InputStream input = http.send(request(messages, tools, settings))) {
+        try (InputStream input = http.send(request(modelRequest), control)) {
             return read(input, onText);
         }
     }
 
     Request request(List<ChatMessage> messages, List<ToolSpec> tools, ModelSettings settings) {
+        return request(new ModelRequest(messages, settings, tools, OutputMode.TEXT, 4096, ModelUse.EXECUTOR));
+    }
+
+    Request request(ModelRequest modelRequest) {
+        List<ChatMessage> messages = modelRequest.messages();
+        List<ToolSpec> tools = modelRequest.tools();
+        ModelSettings settings = modelRequest.settings();
         List<Item> items = new ArrayList<>();
         for (ChatMessage message : messages) {
             if ("tool".equals(message.role())) {
@@ -67,7 +79,8 @@ public final class ResponsesClient implements ChatModel {
         List<Function> functions = tools.stream().map(tool -> new Function("function",
                 tool.function().name(), tool.function().description(), tool.function().parameters())).toList();
         String effort = settings.thinking() ? settings.reasoningLevel() : "none";
-        return new Request(settings.model(), items, new Reasoning(effort), true, functions, "auto");
+        return new Request(settings.model(), items, new Reasoning(effort), true, functions.isEmpty() ? null : functions,
+                functions.isEmpty() ? null : "auto", modelRequest.maxOutputTokens());
     }
 
     AssistantTurn read(InputStream input, Consumer<String> onText) throws IOException {
@@ -106,7 +119,7 @@ public final class ResponsesClient implements ChatModel {
             }
         }
         return new AssistantTurn(text.toString(), List.copyOf(calls), calls.isEmpty() ? "stop" : "tool_calls",
-                reasoning.isEmpty() ? null : reasoning.toString());
+                reasoning.isEmpty() ? null : reasoning.toString(), null, TokenUsage.from(completed[0].usage()));
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -115,12 +128,13 @@ public final class ResponsesClient implements ChatModel {
     record Content(String type, String text) {}
     record Function(String type, String name, String description, ToolSpec.ParameterSchema parameters) {}
     record Reasoning(String effort) {}
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     record Request(String model, List<Item> input, Reasoning reasoning, boolean stream,
-                   List<Function> tools, @JsonProperty("tool_choice") String toolChoice) {}
+                   List<Function> tools, @JsonProperty("tool_choice") String toolChoice, @JsonProperty("max_output_tokens") int maxOutputTokens) {}
     record EventType(String type) {}
     record Delta(String type, String delta) {}
     record Completed(String type, Response response) {}
-    record Response(List<Output> output) {}
+    record Response(List<Output> output, ProviderUsage usage) {}
     record Output(String type, List<Content> content, @JsonProperty("call_id") String callId,
                   String name, String arguments) {}
 }

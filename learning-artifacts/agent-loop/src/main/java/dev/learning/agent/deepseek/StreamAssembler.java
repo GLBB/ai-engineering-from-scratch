@@ -34,6 +34,7 @@ public final class StreamAssembler {
     private String finishReason;
     private boolean done;
     private int chunks;
+    private dev.learning.agent.deepseek.model.TokenUsage usage;
 
     public StreamAssembler(ObjectMapper json, Consumer<String> onText) {
         this.json = json;
@@ -44,7 +45,7 @@ public final class StreamAssembler {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             String line;
             StringBuilder event = new StringBuilder();
-            while ((line = reader.readLine()) != null) {
+            while ((line = StreamingHttp.readLine(reader)) != null) {
                 if (line.isEmpty()) {
                     dispatch(event);
                     event.setLength(0);
@@ -63,13 +64,15 @@ public final class StreamAssembler {
         LOG.debug("SSE assembled; chunks={}; text chars={}; reasoning chars={}; tool calls={}; finish={}",
                 chunks, content.length(), reasoningContent.length(), completedCalls.size(), finishReason);
         return new AssistantTurn(content.toString(), List.copyOf(completedCalls), finishReason,
-                reasoningContent.isEmpty() ? null : reasoningContent.toString());
+                reasoningContent.isEmpty() ? null : reasoningContent.toString(), null, usage);
     }
 
     private void dispatch(StringBuilder event) throws IOException {
         if (event.isEmpty()) return;
         if ("[DONE]".contentEquals(event)) { done = true; return; }
         ChatChunk chunk = json.readValue(event.toString(), ChatChunk.class);
+        usage = dev.learning.agent.deepseek.model.TokenUsage.merge(usage,
+                dev.learning.agent.deepseek.model.TokenUsage.from(chunk.usage()));
         chunks++;
         if (chunk.choices() == null) return;
         for (ChunkChoice choice : chunk.choices()) {
@@ -90,6 +93,9 @@ public final class StreamAssembler {
                 calls.computeIfAbsent(part.index(), ignored -> new CallParts()).append(part);
             LOG.debug("SSE chunk {}: tool fragments={}", chunks, delta.toolCalls().size());
         }
+        int length = content.length() + reasoningContent.length();
+        for (CallParts call : calls.values()) length += call.arguments.length() + call.name.length();
+        if (length > 16_000) throw new IOException("model output too large");
     }
 
     private static final class CallParts {

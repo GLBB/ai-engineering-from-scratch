@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record ChatChunk(List<ChunkChoice> choices) {
+public record ChatChunk(List<ChunkChoice> choices, ProviderUsage usage) {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ChunkChoice(ChunkDelta delta, @JsonProperty("finish_reason") String finishReason) {}
 

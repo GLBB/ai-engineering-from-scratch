@@ -6,6 +6,12 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.learning.agent.core.ChatModel;
+import dev.learning.agent.deepseek.model.TokenUsage;
+import dev.learning.agent.deepseek.model.ProviderUsage;
+import dev.learning.agent.core.ModelRequest;
+import dev.learning.agent.core.RunControl;
+import dev.learning.agent.core.ModelUse;
+import dev.learning.agent.core.OutputMode;
 import dev.learning.agent.deepseek.model.AssistantBlock;
 import dev.learning.agent.deepseek.model.AssistantTurn;
 import dev.learning.agent.deepseek.model.ChatMessage;
@@ -35,15 +41,21 @@ public final class AnthropicClient implements ChatModel {
     public String protocol() { return "Anthropic Messages"; }
 
     @Override
-    public AssistantTurn stream(List<ChatMessage> messages, List<ToolSpec> tools,
-                                Consumer<String> onText, ModelSettings settings)
+    public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control)
             throws IOException, InterruptedException {
-        try (InputStream input = http.send(request(messages, tools, settings))) {
+        try (InputStream input = http.send(request(modelRequest), control)) {
             return read(input, onText);
         }
     }
 
     Request request(List<ChatMessage> messages, List<ToolSpec> tools, ModelSettings settings) throws IOException {
+        return request(new ModelRequest(messages, settings, tools, OutputMode.TEXT, 4096, ModelUse.EXECUTOR));
+    }
+
+    Request request(ModelRequest modelRequest) throws IOException {
+        List<ChatMessage> messages = modelRequest.messages();
+        List<ToolSpec> tools = modelRequest.tools();
+        ModelSettings settings = modelRequest.settings();
         String system = null;
         List<Message> result = new ArrayList<>();
         for (int i = 0; i < messages.size(); i++) {
@@ -70,7 +82,8 @@ public final class AnthropicClient implements ChatModel {
                 tool.function().description(), tool.function().parameters())).toList();
         return new Request(settings.model(), system, result, true,
                 new Thinking(settings.thinking() ? "enabled" : "disabled"),
-                settings.thinking() ? new OutputConfig(settings.reasoningLevel()) : null, functions);
+                settings.thinking() ? new OutputConfig(settings.reasoningLevel()) : null,
+                functions.isEmpty() ? null : functions, modelRequest.maxOutputTokens());
     }
 
     private List<Block> assistantBlocks(ChatMessage message) throws IOException {
@@ -104,12 +117,17 @@ public final class AnthropicClient implements ChatModel {
         Map<Integer, BlockBuilder> blocks = new TreeMap<>();
         String[] stopReason = new String[1];
         boolean[] done = new boolean[1];
+        TokenUsage[] usage = new TokenUsage[1];
         StreamingHttp.readEvents(input, data -> {
             EventType event = json.readValue(data, EventType.class);
             if (event.type() == null || "error".equals(event.type())) {
                 throw new IOException("DeepSeek Anthropic stream returned an error");
             }
             switch (event.type()) {
+                case "message_start" -> {
+                    MessageStart start = json.readValue(data, MessageStart.class);
+                    if (start.message() != null) usage[0] = TokenUsage.from(start.message().usage());
+                }
                 case "content_block_start" -> {
                     BlockStart start = json.readValue(data, BlockStart.class);
                     if (start.contentBlock() == null || blocks.containsKey(start.index())) {
@@ -125,6 +143,7 @@ public final class AnthropicClient implements ChatModel {
                 }
                 case "message_delta" -> {
                     MessageDelta part = json.readValue(data, MessageDelta.class);
+                    usage[0] = TokenUsage.merge(usage[0], TokenUsage.from(part.usage()));
                     if (part.delta() != null && part.delta().stopReason() != null) stopReason[0] = part.delta().stopReason();
                 }
                 case "message_stop" -> done[0] = true;
@@ -155,7 +174,7 @@ public final class AnthropicClient implements ChatModel {
             throw new IOException("Anthropic stop reason does not match tool calls");
         }
         return new AssistantTurn(text.toString(), List.copyOf(calls), calls.isEmpty() ? "stop" : "tool_calls",
-                reasoning.isEmpty() ? null : reasoning.toString(), List.copyOf(saved));
+                reasoning.isEmpty() ? null : reasoning.toString(), List.copyOf(saved), usage[0]);
     }
 
     private final class BlockBuilder {
@@ -201,12 +220,15 @@ public final class AnthropicClient implements ChatModel {
     record OutputConfig(String effort) {}
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Request(String model, String system, List<Message> messages, boolean stream, Thinking thinking,
-                   @JsonProperty("output_config") OutputConfig outputConfig, List<Function> tools) {}
+                   @JsonProperty("output_config") OutputConfig outputConfig, List<Function> tools,
+                   @JsonProperty("max_tokens") int maxTokens) {}
     record EventType(String type) {}
     record BlockStart(int index, @JsonProperty("content_block") Block contentBlock) {}
     record BlockDelta(int index, Delta delta) {}
     record Delta(String type, String text, String thinking, String signature,
                  @JsonProperty("partial_json") String partialJson) {}
-    record MessageDelta(Stop delta) {}
+    record MessageStart(MessageInfo message) {}
+    record MessageInfo(ProviderUsage usage) {}
+    record MessageDelta(Stop delta, ProviderUsage usage) {}
     record Stop(@JsonProperty("stop_reason") String stopReason) {}
 }

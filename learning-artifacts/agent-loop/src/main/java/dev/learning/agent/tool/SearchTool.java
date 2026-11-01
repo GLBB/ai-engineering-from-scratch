@@ -6,6 +6,7 @@ import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.learning.agent.core.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,11 +38,13 @@ public final class SearchTool implements AgentTool {
                 ParameterSchema.oneString("query", "Search query in the user's language.")));
     }
 
-    public String execute(String arguments) throws Exception {
-        SearchArgs args = json.readValue(arguments, SearchArgs.class);
+    public ToolResult execute(ToolInput input, RunScope scope, RunContext context) throws Exception {
+        if (!(input instanceof SearchInput args)) throw new IllegalArgumentException("expected search arguments");
         if (args.query() == null || args.query().isBlank() || args.query().length() > 500)
-            return "error: query is missing or too long";
-        if (key == null || key.isBlank()) return "error: search unavailable; set EXA_AI_KEY";
+            throw new IllegalArgumentException("query is missing or too long");
+        if (key == null || key.isBlank()) return new ToolResult(ToolStatus.ERROR,
+                "search unavailable; set EXA_AI_KEY", "SEARCH_UNAVAILABLE", false, false, false);
+        if (context != null) context.control().check();
         LOG.info("Exa search started; query chars={}; limit=5", args.query().length());
         SearchRequest body = new SearchRequest(args.query(), "auto", 5, new Contents(true));
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.exa.ai/search"))
@@ -51,13 +54,24 @@ public final class SearchTool implements AgentTool {
                 .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
                 .build();
         long start = System.nanoTime();
-        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        var future = http.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+        AutoCloseable cancellation = context == null ? () -> {} : context.control().onCancel(() -> future.cancel(true));
+        HttpResponse<String> response;
+        try {
+            long timeout = context == null ? 30_000 : Math.min(30_000, Math.max(1, context.control().remaining().toMillis()));
+            response = future.get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            future.cancel(true);
+            throw e;
+        } finally { cancellation.close(); }
         LOG.info("Exa HTTP status={}; elapsed={} ms", response.statusCode(),
                 (System.nanoTime() - start) / 1_000_000);
         if (response.statusCode() != 200) throw new IOException("Exa returned HTTP " + response.statusCode());
         SearchResponse found = json.readValue(response.body(), SearchResponse.class);
         LOG.info("Exa results={}", found.results() == null ? 0 : found.results().size());
-        if (found.results() == null || found.results().isEmpty()) return "No results found.";
+        if (found.results() == null || found.results().isEmpty()) {
+            return new ToolResult(ToolStatus.SUCCESS, "No results found.", null, true, false, false);
+        }
         StringBuilder out = new StringBuilder();
         for (SearchResult result : found.results()) {
             if (out.length() > 5_000) { out.append("\n[results truncated]"); break; }
@@ -68,7 +82,8 @@ public final class SearchTool implements AgentTool {
                         Math.min(result.highlights().get(0).length(), 500)).append("\n");
             out.append("\n");
         }
-        return out.toString();
+        return new ToolResult(ToolStatus.SUCCESS, out.toString(), null, true, true,
+                out.indexOf("[results truncated]") >= 0);
     }
 
     record SearchArgs(String query) {}

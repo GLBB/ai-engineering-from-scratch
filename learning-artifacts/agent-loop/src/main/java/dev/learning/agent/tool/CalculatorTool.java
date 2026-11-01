@@ -5,6 +5,7 @@ import dev.learning.agent.deepseek.model.ToolSpec.FunctionSpec;
 import dev.learning.agent.deepseek.model.ToolSpec.ParameterSchema;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.learning.agent.core.*;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -20,9 +21,10 @@ public final class CalculatorTool implements AgentTool {
                 ParameterSchema.oneString("expression", "The arithmetic expression to calculate.")));
     }
 
-    public String execute(String arguments) throws Exception {
-        CalculatorArgs args = json.readValue(arguments, CalculatorArgs.class);
-        return new Parser(args.expression()).parse();
+    public ToolResult execute(ToolInput input, RunScope scope, RunContext context) throws Exception {
+        if (!(input instanceof CalculatorInput args)) throw new IllegalArgumentException("expected calculator arguments");
+        if (context != null) context.control().check();
+        return new ToolResult(ToolStatus.SUCCESS, new Parser(args.expression()).parse(), null, true, true, false);
     }
 
     record CalculatorArgs(String expression) {}

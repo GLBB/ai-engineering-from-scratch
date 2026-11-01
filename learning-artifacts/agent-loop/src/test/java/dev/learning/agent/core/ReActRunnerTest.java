@@ -17,7 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class AgentLoopTest {
+class ReActRunnerTest {
     @Test
     void noToolCallsEndsTheLoopEvenWhenTheTaskWasNotPerformed() throws Exception {
         ToolRegistry tools = new ToolRegistry();
@@ -25,12 +25,14 @@ class AgentLoopTest {
         List<List<ChatMessage>> requests = new ArrayList<>();
         List<String> toolNotifications = new ArrayList<>();
         List<String> text = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> {
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings();
             requests.add(messages);
             onText.accept("I will calculate that next.");
             return new AssistantTurn("I will calculate that next.", List.of(), "stop");
         };
-        AgentLoop loop = new AgentLoop(model, tools, 3, text::add, toolNotifications::add);
+        TestAgent loop = new TestAgent(model, tools, 3, text::add, toolNotifications::add);
 
         loop.run("Use calculator to calculate 1+2.", ModelSettings.defaults());
 
@@ -42,11 +44,13 @@ class AgentLoopTest {
     @Test
     void finalAnswerIsIncludedInNextUserRequest() throws Exception {
         List<List<ChatMessage>> requests = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> {
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings();
             requests.add(messages);
             return new AssistantTurn("answer", List.of(), "stop");
         };
-        AgentLoop loop = new AgentLoop(model, new ToolRegistry(), 1, ignored -> {}, ignored -> {});
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 1, ignored -> {}, ignored -> {});
 
         loop.run("first", ModelSettings.defaults());
         loop.run("second", ModelSettings.defaults());
@@ -64,7 +68,9 @@ class AgentLoopTest {
         List<List<ChatMessage>> requests = new ArrayList<>();
         List<String> toolNotifications = new ArrayList<>();
         List<TraceEvent> trace = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> {
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings();
             requests.add(messages);
             return switch (requests.size()) {
                 case 1 -> new AssistantTurn("", List.of(call("a", "1+2"), call("b", "4*5")), "tool_calls");
@@ -72,7 +78,7 @@ class AgentLoopTest {
                 default -> new AssistantTurn("done", List.of(), "stop");
             };
         };
-        AgentLoop loop = new AgentLoop(model, tools, 3, ignored -> {}, toolNotifications::add, trace::add);
+        TestAgent loop = new TestAgent(model, tools, 3, ignored -> {}, toolNotifications::add, trace::add);
 
         loop.run("calculate", ModelSettings.defaults());
 
@@ -80,7 +86,7 @@ class AgentLoopTest {
         List<ChatMessage> results = requests.get(2).stream()
                 .filter(message -> "tool".equals(message.role())).toList();
         assertEquals(List.of("a", "b", "c"), results.stream().map(ChatMessage::toolCallId).toList());
-        assertEquals(List.of("3", "20", "5"), results.stream().map(ChatMessage::content).toList());
+        assertEquals(List.of("3", "20", "5"), results.stream().map(message -> content(message.content())).toList());
         assertEquals(List.of("tool: calculator", "tool: calculator", "tool: calculator"), toolNotifications);
         List<TraceEvent> started = trace.stream()
                 .filter(event -> "tool".equals(event.kind()) && "running".equals(event.status())).toList();
@@ -98,14 +104,16 @@ class AgentLoopTest {
     void unexpectedFinishReasonDoesNotRecordAnswerOrDispatchTools(boolean withTools) throws Exception {
         List<List<ChatMessage>> requests = new ArrayList<>();
         List<String> toolNotifications = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> {
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings();
             requests.add(messages);
             if (requests.size() == 1) {
                 return new AssistantTurn("partial", withTools ? List.of(call("a", "1+2")) : List.of(), "length");
             }
             return new AssistantTurn("done", List.of(), "stop");
         };
-        AgentLoop loop = new AgentLoop(model, new ToolRegistry(), 2, ignored -> {}, toolNotifications::add);
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, toolNotifications::add);
 
         IOException error = assertThrows(IOException.class, () -> loop.run("first", ModelSettings.defaults()));
         assertEquals(withTools ? "DeepSeek returned tools with unexpected finish reason: length"
@@ -119,12 +127,14 @@ class AgentLoopTest {
     @Test
     void turnLimitStillRecordsLastToolResult() throws Exception {
         List<List<ChatMessage>> requests = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> {
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings();
             requests.add(messages);
             return new AssistantTurn("", List.of(new ToolCall("missing", "function",
                     new ToolCall.FunctionCall("unknown", "{}"))), "tool_calls");
         };
-        AgentLoop loop = new AgentLoop(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {});
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {});
 
         IOException error = assertThrows(IOException.class, () -> loop.run("first", ModelSettings.defaults()));
         assertEquals("agent stopped after 2 model turns", error.getMessage());
@@ -134,15 +144,17 @@ class AgentLoopTest {
         List<ChatMessage> nextRequest = requests.get(2);
         assertEquals(List.of("system", "user", "assistant", "tool", "assistant", "tool", "user"),
                 roles(nextRequest));
-        assertEquals("error: unknown tool unknown", nextRequest.get(5).content());
+        assertEquals("unknown tool unknown", content(nextRequest.get(5).content()));
     }
 
     @Test
     void interruptedModelRequestIsTracedAndRethrown() {
         InterruptedException failure = new InterruptedException("cancelled");
         List<TraceEvent> trace = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> { throw failure; };
-        AgentLoop loop = new AgentLoop(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {}, trace::add);
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings(); throw failure; };
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {}, trace::add);
 
         assertSame(failure, assertThrows(InterruptedException.class, () -> loop.run("hello", ModelSettings.defaults())));
         assertEquals(List.of("complete", "complete", "running", "error"),
@@ -155,8 +167,10 @@ class AgentLoopTest {
     void runtimeFailureWithoutMessageUsesExceptionNameInTrace() {
         IllegalStateException failure = new IllegalStateException();
         List<TraceEvent> trace = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> { throw failure; };
-        AgentLoop loop = new AgentLoop(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {}, trace::add);
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings(); throw failure; };
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {}, trace::add);
 
         assertSame(failure, assertThrows(IllegalStateException.class, () -> loop.run("hello", ModelSettings.defaults())));
         assertEquals("error", trace.get(3).status());
@@ -167,11 +181,13 @@ class AgentLoopTest {
     void invalidInputDoesNotChangeHistoryOrEmitTrace() throws Exception {
         List<List<ChatMessage>> requests = new ArrayList<>();
         List<TraceEvent> trace = new ArrayList<>();
-        ChatModel model = (messages, definitions, onText, settings) -> {
+        ChatModel model = (request, onText, control) -> {
+            var messages = request.messages();
+            var settings = request.settings();
             requests.add(messages);
             return new AssistantTurn("done", List.of(), "stop");
         };
-        AgentLoop loop = new AgentLoop(model, new ToolRegistry(), 1, ignored -> {}, ignored -> {}, trace::add);
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 1, ignored -> {}, ignored -> {}, trace::add);
 
         assertThrows(IllegalArgumentException.class, () -> loop.run(null, ModelSettings.defaults()));
         assertThrows(IllegalArgumentException.class, () -> loop.run(" ", ModelSettings.defaults()));
@@ -180,6 +196,11 @@ class AgentLoopTest {
         assertTrue(trace.isEmpty());
         loop.run("valid", ModelSettings.defaults());
         assertEquals(List.of("system", "user"), roles(requests.get(0)));
+    }
+
+    private static String content(String json) {
+        try { return new ObjectMapper().readTree(json).path("content").asText(); }
+        catch (Exception e) { throw new AssertionError(e); }
     }
 
     private static ToolCall call(String id, String expression) {

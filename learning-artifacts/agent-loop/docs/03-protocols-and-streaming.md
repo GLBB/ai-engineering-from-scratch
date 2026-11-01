@@ -14,7 +14,7 @@
 | Responses | [ResponsesClient](../src/main/java/dev/learning/agent/deepseek/ResponsesClient.java) | `/responses` | `input` 中的消息、`function_call`、`function_call_output` 和语义化流事件。 |
 | Anthropic Messages | [AnthropicClient](../src/main/java/dev/learning/agent/deepseek/AnthropicClient.java) | `/anthropic/v1/messages` | 有顺序的内容块，`tool_use`、`tool_result` 和 thinking 内容。 |
 
-[AgentLoop](../src/main/java/dev/learning/agent/core/AgentLoop.java) 处理统一后的回答、工具调用和结束原因；具体请求和响应的差别由客户端处理。DeepSeek 的 Responses 接口是无状态的，每次请求都需要携带完整历史。
+[AgentLoop](../src/main/java/dev/learning/agent/core/ReActRunner.java) 处理统一后的回答、工具调用和结束原因；具体请求和响应的差别由客户端处理。DeepSeek 的 Responses 接口是无状态的，每次请求都需要携带完整历史。
 
 ## 模型和推理等级怎么传
 

@@ -12,4 +12,5 @@ public interface RunContext {
     ModelGateway model();
     ToolExecutionService tools();
     ApprovalGateway approvals();
+    default void emit(String type, Object data) { events().emit(new RuntimeEvent(type, data)); }
 }
