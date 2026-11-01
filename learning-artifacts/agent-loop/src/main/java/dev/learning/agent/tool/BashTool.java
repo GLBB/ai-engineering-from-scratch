@@ -32,6 +32,10 @@ public final class BashTool implements AgentTool {
         this.approveOutput = approveOutput;
     }
 
+    public ToolInput decode(String arguments) throws java.io.IOException {
+        return new BashInput(ToolInputDecoder.oneString(arguments, "command", 2000));
+    }
+
     public ToolSpec definition() {
         return new ToolSpec("function", new FunctionSpec("bash",
                 "Run a Bash command in the project directory after user approval. Read-only commands are preferred.",

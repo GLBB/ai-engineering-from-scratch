@@ -48,14 +48,14 @@ class RewooRunnerTest {
         String invalid = CHAIN.replace("#E1/3", "#E2/3");
         assertThrows(java.io.IOException.class, () -> run(invalid, invalid));
         assertThrows(java.io.IOException.class, () -> RewooValidator.validate(
-                RewooPlanParser.parse(CHAIN.replace("\"E1\",\"purpose\"", "\"E2\",\"purpose\"")), Set.of("calculator")));
+                parse(CHAIN.replace("\"E1\",\"purpose\"", "\"E2\",\"purpose\"")), Set.of("calculator")));
     }
 
     @Test void rejectsMissingReferencesUnknownToolsAndWrongScalarTypes() {
         assertThrows(java.io.IOException.class, () -> RewooValidator.validate(
-                RewooPlanParser.parse(CHAIN.replace("#E1/3", "#E9/3")), Set.of("calculator")));
-        assertThrows(java.io.IOException.class, () -> RewooPlanParser.parse(CHAIN.replace("\"calculator\"", "\"invented\"")));
-        assertThrows(java.io.IOException.class, () -> RewooPlanParser.parse(CHAIN.replace("\"120+18\"", "123")));
+                parse(CHAIN.replace("#E1/3", "#E9/3")), Set.of("calculator")));
+        assertThrows(java.io.IOException.class, () -> parse(CHAIN.replace("\"calculator\"", "\"invented\"")));
+        assertThrows(java.io.IOException.class, () -> parse(CHAIN.replace("\"120+18\"", "123")));
         assertThrows(java.io.IOException.class, () -> StrictJson.object("{\"version\":1,\"version\":1}"));
     }
 
@@ -78,7 +78,7 @@ class RewooRunnerTest {
         EvidenceStore store = new InMemoryEvidenceStore();
         store.put(new Evidence("E1", null, "search", "{}", new ToolResult(ToolStatus.SUCCESS, "#E9", null, true, true, false), 0));
         store.put(new Evidence("E10", null, "search", "{}", new ToolResult(ToolStatus.SUCCESS, "ten", null, true, true, false), 0));
-        assertEquals("#E9 and ten", ((SearchInput) EvidenceBinder.bind(new SearchInput("#E1 and #E10"), store)).query());
+        assertEquals("#E9 and ten", ((SearchInput) EvidenceBinder.bind(new SearchInput("#E1 and #E10"), store, registry())).query());
     }
 
     @Test void formatRepairIsBoundedAndCanRecoverBeforeExecution() throws Exception {
@@ -97,6 +97,14 @@ class RewooRunnerTest {
         assertEquals(ExecutionStatus.COMPLETE, outcome.result().status());
         assertEquals(0, outcome.result().counters().toolAttempts());
     }
+
+    private ToolRegistry registry() {
+        ToolRegistry tools = new ToolRegistry();
+        tools.register(new CalculatorTool(new ObjectMapper()));
+        tools.register(new dev.learning.agent.tool.SearchTool(new ObjectMapper(), null));
+        return tools;
+    }
+    private RewooPlan parse(String text) throws java.io.IOException { return RewooPlanParser.parse(text, registry()); }
 
     private Outcome run(String... outputs) throws Exception {
         ToolRegistry tools = new ToolRegistry();

@@ -4,6 +4,8 @@
 
 [项目](../../README.md) · [研究证据](agent-execution-research.md) · [界面示意](figures/execution-modes-ui.svg)
 
+天气能力新增的自主参数解码、通用字符串绑定、来源信息和 NEEDS_INPUT 状态详见[天气实现方案](weather-capability-implementation-plan.md)。
+
 本文是 ReAct、ReWOO、Plan-and-Execute 的统一开发依据，确定类边界、接口、状态转移、执行算法、改造顺序与验收用例。代码块说明接口与算法；当前实现已覆盖三模式，验收结果与仍需扩展的样例见第 14–15 节及研究记录。
 
 阅读时先沿第 3 节理解一次请求怎样流动，再看第 5 节的对话与运行管理，以及第 7–9 节的三种执行流程。第 4 节完整类型签名用于实现时查阅；理解主线后再展开，不需要先记住所有类名。
@@ -115,12 +117,12 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 public enum AgentMode { REACT, REWOO, PLAN_EXECUTE }
-public enum ExecutionStatus { COMPLETE, PARTIAL, FAILED, CANCELLED }
+public enum ExecutionStatus { NEEDS_INPUT, COMPLETE, PARTIAL, FAILED, CANCELLED }
 public enum CompletionCheck { UNVERIFIED, PASSED, FAILED }
-public enum EngineStop { FINAL_RESPONSE, LOCAL_BUDGET, CANCELLED, INVALID_RESPONSE }
+public enum EngineStop { NEEDS_INPUT, FINAL_RESPONSE, LOCAL_BUDGET, CANCELLED, INVALID_RESPONSE }
 public enum OutputMode { TEXT, JSON_OBJECT }
 public enum ModelUse { CONTROL, EXECUTOR, FINALIZER }
-public enum ToolStatus { SUCCESS, ERROR, DENIED, TIMEOUT, CANCELLED, SKIPPED }
+public enum ToolStatus { NEEDS_INPUT, SUCCESS, ERROR, DENIED, TIMEOUT, CANCELLED, SKIPPED }
 
 public record ExecutionRequest(UUID requestId, String prompt, ModelSettings settings) {}
 public record RunScope(String phase, String stepId, int revision) {}
@@ -133,21 +135,15 @@ public record ModelRequest(List<ChatMessage> messages, ModelSettings settings,
                            List<ToolSpec> tools, OutputMode outputMode,
                            int maxOutputTokens, ModelUse use) {}
 
-public sealed interface ToolInput permits CalculatorInput, SearchInput, BashInput {
+public interface ToolInput {
     String toolName();
+    List<String> templateStrings();
+    ToolInput mapStrings(java.util.function.UnaryOperator<String> mapper);
 }
-public record CalculatorInput(String expression) implements ToolInput {
-    public String toolName() { return "calculator"; }
-}
-public record SearchInput(String query) implements ToolInput {
-    public String toolName() { return "search"; }
-}
-public record BashInput(String command) implements ToolInput {
-    public String toolName() { return "bash"; }
-}
-
+public record ToolSource(String label, String url) {}
 public record ToolResult(ToolStatus status, String content, String errorCode,
-                         boolean executed, boolean hasValue, boolean truncated) {}
+                         boolean executed, boolean hasValue, boolean truncated,
+                         List<ToolSource> sources) {}
 public record Evidence(String id, String stepId, String tool,
                        String boundArgumentsJson, ToolResult result, long durationMs) {}
 
@@ -176,6 +172,7 @@ public interface ModelGateway {
             throws IOException, InterruptedException;
 }
 public interface ToolExecutionService {
+    Set<String> availableTools();
     Evidence invoke(ToolInput input, String evidenceId, Set<String> allowedTools,
                     RunScope scope, RunContext context);
     Evidence invokeNative(ToolCall call, String evidenceId, Set<String> allowedTools,
@@ -376,7 +373,7 @@ Controller 注册 `AgentRunInterceptor implements CallableProcessingInterceptor`
 
 当前 ToolRegistry 用字符串同时表达结果和错误。模型能阅读这些文字，但程序要决定是否执行下游节点，就需要明确状态。例如 search 请求正常完成却没有匹配项：工具实际运行了，后续仍没有可用值。ToolResult 将这些事实拆开，Evidence 再加上 ID、所属步骤和耗时，供依赖绑定与复盘使用。
 
-`AgentTool.execute(String)` 改成下面的目标方法；工具注册表只负责目录、查找与参数解码，执行状态和事件集中在 ToolExecutionService。
+`AgentTool.execute(String)` 改成下面的目标方法；工具注册表负责目录、查找并委托具体工具解码，执行状态和事件集中在 ToolExecutionService。
 
 ```java
 ToolResult execute(ToolInput input, RunScope scope, RunContext context)
@@ -488,7 +485,7 @@ TaskInput 包含本轮原问题和固定的历史快照。所有方法的模型 
 
 JSON 解析拒绝空白、Markdown 包裹、尾随内容、重复 key、未知字段、缺失字段和标量类型强制转换。最多 8 个节点；ID 符合 `E[1-9][0-9]*`，唯一且无自引用/环，所有引用存在，answerEvidence 均存在。空计划必须使用空 answerEvidence。
 
-参数由各工具的具体类型校验。拓扑排序采用入度和就绪队列；多个节点同时就绪时保持原列表优先级。复杂度 O(V+E)，不通过 `toString()` 搜索依赖。
+参数由注册工具的 decode 方法校验。拓扑排序采用入度和就绪队列；多个节点同时就绪时保持原列表优先级。复杂度 O(V+E)，不通过 `toString()` 搜索依赖。
 
 Binder 只扫描原参数字符串里的引用，以完整 ID 匹配，避免 E1 与 E10 混淆；替换后的证据内容不再作为模板递归解析。非 SUCCESS、未获分享或已截断的证据不能绑定为精确参数。绑定后重新执行工具长度、格式与表达式检查。
 
@@ -663,7 +660,7 @@ HttpClient 的响应对象可在响应体尚未读完时返回，因此现有取
 
 ### 10.4 执行结束与任务正确性
 
-COMPLETE 表示当前模式的流程、必需步骤和证据检查通过；PARTIAL 表示有可用结果但存在缺口；FAILED 表示流程失败或无所需证据；CANCELLED 表示取消。P&E 按当前有效计划判定，不要求历史上被替换的步骤全部成功。
+NEEDS_INPUT 表示工具仍需要用户补充，本轮正常结束并保留澄清问答，后续消息重新查询；具体停止与配对规则见[天气方案](weather-capability-implementation-plan.md#8-三模式中的行为与澄清)。COMPLETE 表示当前模式的流程、必需步骤和证据检查通过；PARTIAL 表示有可用结果但存在缺口；FAILED 表示流程失败或无所需证据；CANCELLED 表示取消。P&E 按当前有效计划判定，不要求历史上被替换的步骤全部成功。
 
 三模式初始 completionCheck 均为 UNVERIFIED。只有预先定义的确定性任务检查器才能置 PASSED/FAILED；模型自称完成或 FINISH 不改变该字段。正常问候/澄清允许无工具完成，不把它解释成已经完成原本未澄清的业务目标。
 
@@ -725,7 +722,7 @@ index.html 在导航后、conversation 与 trace-view 之前新增 `section.mode
 | run_result | RunResult 本身；mode 来自 run_started |
 | done / error | 保留现有传输终态；error 加 code 和 message |
 
-正常或业务不足的顺序为 run_started → 阶段事件 → run_result → done。运行时异常为 run_started → 可选 run_result → error；之后不再发送 done。连接已断时仅做后端清理。done 只表示事件流正常终止。
+正常、待补充信息或业务不足的顺序为 run_started → 阶段事件 → run_result → done。运行时异常为 run_started → 可选 run_result → error；之后不再发送 done。连接已断时仅做后端清理。done 只表示事件流正常终止。
 
 传输示例；UUID 与内容为固定夹具：
 

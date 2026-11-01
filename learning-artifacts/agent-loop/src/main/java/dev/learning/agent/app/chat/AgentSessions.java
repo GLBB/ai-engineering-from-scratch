@@ -18,6 +18,10 @@ import dev.learning.agent.tool.BashTool;
 import dev.learning.agent.tool.CalculatorTool;
 import dev.learning.agent.tool.SearchTool;
 import dev.learning.agent.tool.ToolRegistry;
+import dev.learning.agent.tool.weather.CurrentWeatherTool;
+import dev.learning.agent.tool.weather.WeatherForecastTool;
+import dev.learning.agent.tool.weather.WeatherService;
+import dev.learning.agent.tool.weather.OpenMeteoClient;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class AgentSessions {
     private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
     private final ObjectMapper json = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    private final WeatherService weather = new WeatherService(new OpenMeteoClient(json), java.time.Clock.systemUTC());
     private final ChatModel client;
     private final Path projectRoot;
     private final String exaKey;
@@ -81,6 +86,8 @@ final class AgentSessions {
             tools.register(new CalculatorTool(json));
             tools.register(new BashTool(json, projectRoot, command -> false, output -> false));
             tools.register(new SearchTool(json, exaKey));
+            tools.register(new CurrentWeatherTool(weather));
+            tools.register(new WeatherForecastTool(weather));
         }
         String id() { return id; }
         synchronized RunLease accept(String prompt, ModelSettings settings, AgentMode requested) {

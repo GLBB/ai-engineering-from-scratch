@@ -23,6 +23,12 @@ public final class ToolRegistry {
     }
 
     public List<ToolSpec> definitions() { return tools.values().stream().map(AgentTool::definition).toList(); }
+    public java.util.Set<String> names() { return java.util.Set.copyOf(tools.keySet()); }
+    public ToolInput decode(String name, String arguments) throws IOException {
+        AgentTool tool = find(name);
+        if (tool == null) throw new IOException("unknown tool " + name);
+        return tool.decode(arguments);
+    }
     public AgentTool find(String name) { return tools.get(name); }
 
     public String dispatch(ToolCall call) {

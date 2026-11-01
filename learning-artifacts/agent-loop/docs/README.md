@@ -15,7 +15,9 @@
 
 ## 开发设计与研究
 
-[三模式技术方案](design/agent-execution-technical-design.md) 是开发时的统一依据，确定接口、算法、对话模式锁定、异常、文件改造和测试；[研究记录](design/agent-execution-research.md)只保存来源与事实依据。上述 01–06 篇解释当前已实现代码，复习总结见 [review-notes](../../review-notes/README.md)。新增模式仍待实施。
+[三模式技术方案](design/agent-execution-technical-design.md) 是开发时的统一依据，确定接口、算法、对话模式锁定、异常、文件改造和测试；[研究记录](design/agent-execution-research.md)只保存来源与事实依据。上述 01–06 篇解释当前已实现代码，复习总结见 [review-notes](../../review-notes/README.md)。三模式已实现，具体测试和真实接口记录见研究记录。
+
+[天气能力实现方案](design/weather-capability-implementation-plan.md) 定义当前天气与逐日预报两个工具，说明城市名如何转换为 API 经纬度、同名地点如何确认，以及三模式的接入与验收；天气工具及澄清流程已接入，实际验证范围记录在方案末尾。
 
 ## 先记住三个概念
 

@@ -1,4 +1,4 @@
 package dev.learning.agent.core;
 
 
-public enum ExecutionStatus { COMPLETE, PARTIAL, FAILED, CANCELLED }
+public enum ExecutionStatus { NEEDS_INPUT, COMPLETE, PARTIAL, FAILED, CANCELLED }

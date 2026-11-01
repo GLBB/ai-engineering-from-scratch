@@ -682,3 +682,5 @@ textarea::placeholder {
 .plan-status { color: #167a68; font-size: 12px; }
 .plan-step pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #65707c; font: inherit; font-size: 12px; }
 @media (max-width: 600px) { .mode-bar { align-items: flex-start; } #mode-hint { flex-basis: 100%; } }
+
+.tool-source { display: block; width: fit-content; margin-top: 8px; color: #167a68; font-size: 12px; }

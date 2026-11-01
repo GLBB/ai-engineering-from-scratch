@@ -26,6 +26,8 @@ public final class AnswerChecks {
         try { store.requireUsable(id); return true; } catch (IllegalArgumentException e) { return false; }
     }
     public static ExecutionStatus status(List<String> required, EvidenceStore store) {
+        if (store.snapshot().stream().anyMatch(item -> item.result().status() == dev.learning.agent.tool.ToolStatus.NEEDS_INPUT))
+            return ExecutionStatus.NEEDS_INPUT;
         if (store.snapshot().isEmpty() && required.isEmpty()) return ExecutionStatus.COMPLETE;
         boolean any = store.snapshot().stream().anyMatch(e -> usable(store, e.id()));
         if (!any) return ExecutionStatus.FAILED;

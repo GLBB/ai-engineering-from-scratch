@@ -92,7 +92,7 @@ final class ChatController {
                 RunResult result = session.execute(lease, sink);
                 if (result == null) return;
                 sink.emit("run_result", result);
-                if (result.status() == ExecutionStatus.COMPLETE || result.status() == ExecutionStatus.PARTIAL) sink.emit("done", "");
+                if (result.status() == ExecutionStatus.COMPLETE || result.status() == ExecutionStatus.PARTIAL || result.status() == ExecutionStatus.NEEDS_INPUT) sink.emit("done", "");
                 else sink.emit("error", new ChatErrors.ApiError(result.errorCode() == null ? "INCOMPLETE_RUN" : result.errorCode(), "Run did not complete."));
             } catch (Exception e) {
                 lease.cancel("stream or execution failed");

@@ -18,9 +18,9 @@ class PackageStructureTest {
 
     @Test
     void algorithmPackagesOnlyShareTheIntendedReactEngine() throws IOException {
-        assertNoImportsFrom("core/react", "core.rewoo", "core.planexecute");
-        assertNoImportsFrom("core/rewoo", "core.react", "core.planexecute");
-        assertNoImportsFrom("core/planexecute", "core.rewoo");
+        assertNoImportsFrom("core/react", "core.rewoo", "core.planexecute", "tool.weather");
+        assertNoImportsFrom("core/rewoo", "core.react", "core.planexecute", "tool.weather");
+        assertNoImportsFrom("core/planexecute", "core.rewoo", "tool.weather");
         assertNoImportsFrom("core/planning", "core.react", "core.rewoo", "core.planexecute");
     }
 

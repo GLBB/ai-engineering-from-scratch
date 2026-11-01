@@ -53,6 +53,7 @@ public final class PlanExecuteRunner implements AgentRunner {
             StepResult result = executor.execute(task, step, ledger, request.settings(), context);
             ledger.record(result);
             context.emit("step_result", result);
+            if (context.needsInput()) { termination = "user clarification required; do not revise or guess"; break; }
             ModelJson.phase(context, "REPLAN", "running", step.id(), ledger.current().revision());
             ReviewInput input = new ReviewInput(task, ledger.current(), ledger.attempts(), context.evidence().snapshot());
             ReplanDecision decision = ModelJson.request(Prompts.read("replanner"), input, request.settings(),
@@ -87,11 +88,11 @@ public final class PlanExecuteRunner implements AgentRunner {
         AnswerChecks.citations(answer, answerEvidence, context.evidence());
         boolean hasEvidence = context.evidence().snapshot().stream().anyMatch(e -> e.result().status() == ToolStatus.SUCCESS
                 && e.result().hasValue() && !e.result().truncated());
-        ExecutionStatus status = ledger.complete() && !explicitPartial ? ExecutionStatus.COMPLETE
+        ExecutionStatus status = context.needsInput() ? ExecutionStatus.NEEDS_INPUT : ledger.complete() && !explicitPartial ? ExecutionStatus.COMPLETE
                 : hasEvidence ? ExecutionStatus.PARTIAL : ExecutionStatus.FAILED;
         if (status != ExecutionStatus.FAILED) memory.commit(request.prompt(), answer);
         return new RunResult(status, CompletionCheck.UNVERIFIED, answer,
-                status == ExecutionStatus.COMPLETE ? null : "INCOMPLETE_PLAN", context.budget().snapshot());
+                status == ExecutionStatus.COMPLETE ? null : status == ExecutionStatus.NEEDS_INPUT ? "NEEDS_INPUT" : "INCOMPLETE_PLAN", context.budget().snapshot());
     }
     private static void display(RunContext context, ExecutionLedger ledger) {
         context.emit("plan", new ModelJson.PlanDisplay(AgentMode.PLAN_EXECUTE, ledger.current().revision(), ledger.current()));

@@ -16,6 +16,8 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
     private final ToolRegistry registry;
     public DefaultToolExecutionService(ToolRegistry registry) { this.registry = registry; }
 
+    public Set<String> availableTools() { return registry.names(); }
+
     public Evidence invoke(ToolInput input, String id, Set<String> allowed, RunScope scope, RunContext context) {
         return attempt(input.toolName(), StrictJson.write(input), id, allowed, scope, context);
     }
@@ -41,7 +43,7 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
             if (!allowed.contains(name) || registry.find(name) == null) {
                 result = failure(ToolStatus.ERROR, "UNKNOWN_TOOL", "unknown tool " + name, false);
             } else {
-                ToolInput input = ToolInputDecoder.decode(name, arguments);
+                ToolInput input = registry.decode(name, arguments);
                 if (context.mode() == AgentMode.PLAN_EXECUTE && input instanceof BashInput
                         && context.evidence().snapshot().stream().anyMatch(item -> name.equals(item.tool())
                         && StrictJson.write(input).equals(item.boundArgumentsJson()))) {
@@ -60,7 +62,7 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
         } catch (java.util.concurrent.CancellationException e) {
             result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool cancelled", dispatched);
         } catch (java.io.IOException | IllegalArgumentException | ArithmeticException e) {
-            result = failure(ToolStatus.ERROR, "TOOL_FAILED", "invalid tool arguments or operation: " + e.getMessage(), dispatched);
+            result = failure(ToolStatus.ERROR, dispatched ? "TOOL_FAILED" : "INVALID_ARGUMENTS", "invalid tool arguments or operation: " + e.getMessage(), dispatched);
         } catch (Exception e) {
             result = failure(ToolStatus.ERROR, "TOOL_FAILED", "tool failed", dispatched);
         }
@@ -80,7 +82,7 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
             ToolResult value = item.result();
             if ("calculator".equals(item.tool()) && args.equals(item.boundArgumentsJson())
                     && value.status() == ToolStatus.SUCCESS && value.hasValue() && !value.truncated()) {
-                return new ToolResult(ToolStatus.SUCCESS, value.content(), null, false, true, false);
+                return new ToolResult(ToolStatus.SUCCESS, value.content(), null, false, true, false, value.sources());
             }
         }
         return null;
@@ -104,7 +106,7 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
         int keep = Math.max(0, Math.min(8000, 32000 - used));
         if (result.content().length() > keep) {
             result = new ToolResult(result.status(), result.content().substring(0, keep), result.errorCode(),
-                    result.executed(), result.hasValue(), true);
+                    result.executed(), result.hasValue(), true, result.sources());
         }
         Evidence evidence = new Evidence(id, scope.stepId(), name, args, result, duration);
         context.evidence().put(evidence);
@@ -114,8 +116,8 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
 
     public static String modelContent(Evidence evidence) {
         return StrictJson.write(new ToolOutput(evidence.id(), evidence.result().status(), evidence.result().content(),
-                evidence.result().executed(), evidence.result().hasValue(), evidence.result().truncated()));
+                evidence.result().executed(), evidence.result().hasValue(), evidence.result().truncated(), evidence.result().sources()));
     }
 
-    record ToolOutput(String evidenceId, ToolStatus status, String content, boolean executed, boolean hasValue, boolean truncated) {}
+    record ToolOutput(String evidenceId, ToolStatus status, String content, boolean executed, boolean hasValue, boolean truncated, java.util.List<ToolSource> sources) {}
 }

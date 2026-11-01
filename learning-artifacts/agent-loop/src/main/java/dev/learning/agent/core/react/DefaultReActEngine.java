@@ -43,9 +43,9 @@ public final class DefaultReActEngine implements ReActEngine {
                 Evidence evidence;
                 boolean cancelled = Thread.currentThread().isInterrupted();
                 try { context.control().check(); } catch (InterruptedException e) { cancelled = true; }
-                if (cancelled || attempted >= request.maxToolAttempts()) {
+                if (cancelled || context.needsInput() || attempted >= request.maxToolAttempts()) {
                     evidence = DefaultToolExecutionService.skipped(call.function().name(), call.function().arguments(),
-                            id, request.scope(), context, cancelled ? "run cancelled; not executed" : "local tool limit; not executed");
+                            id, request.scope(), context, cancelled ? "run cancelled; not executed" : context.needsInput() ? "awaiting user input; not executed" : "local tool limit; not executed");
                 } else {
                     attempted++;
                     evidence = context.tools().invokeNative(call, id, request.allowedTools(), request.scope(), context);
@@ -56,6 +56,7 @@ public final class DefaultReActEngine implements ReActEngine {
             transcript.addAll(results);
             request.onCheckpoint().accept(List.copyOf(transcript));
             context.control().check();
+            if (context.needsInput()) return new EngineResult(transcript, null, EngineStop.NEEDS_INPUT);
         }
         return new EngineResult(transcript, null, EngineStop.LOCAL_BUDGET);
     }

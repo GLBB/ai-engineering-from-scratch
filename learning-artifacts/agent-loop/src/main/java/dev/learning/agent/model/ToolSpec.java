@@ -18,5 +18,9 @@ public record ToolSpec(String type, FunctionSpec function) {
         }
     }
 
-    public record PropertySchema(String type, String description) {}
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record PropertySchema(String type, String description, Integer minimum, Integer maximum,
+                                 Integer maxLength, String pattern) {
+        public PropertySchema(String type, String description) { this(type, description, null, null, null, null); }
+    }
 }

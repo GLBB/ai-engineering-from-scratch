@@ -27,6 +27,7 @@ public final class StepExecutor {
         var transcript = List.of(ChatMessage.system(Prompts.read("step-executor")), ChatMessage.user(StrictJson.write(input)));
         EngineResult result = engine.execute(new EngineRequest(transcript, settings, Set.copyOf(step.allowedTools()),
                 3, 2, false, new RunScope("EXECUTE", step.id(), ledger.current().revision())), context);
+        if (result.stop() == EngineStop.NEEDS_INPUT) return incomplete(step, "user clarification required");
         if (result.stop() != EngineStop.FINAL_RESPONSE) return incomplete(step, "local execution budget exhausted");
         try {
             var node = StrictJson.object(result.finalTurn().content());

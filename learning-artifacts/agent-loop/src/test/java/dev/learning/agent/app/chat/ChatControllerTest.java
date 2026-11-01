@@ -1,5 +1,10 @@
 package dev.learning.agent.app.chat;
 
+import dev.learning.agent.core.ExecutionRequest;
+import dev.learning.agent.core.RunResult;
+import dev.learning.agent.core.ExecutionStatus;
+import dev.learning.agent.core.CompletionCheck;
+
 import dev.learning.agent.core.AgentMode;
 import dev.learning.agent.model.AssistantTurn;
 import dev.learning.agent.model.ModelSettings;
@@ -66,6 +71,26 @@ class ChatControllerTest {
         mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REACT\"}"))
                 .andExpect(status().isConflict()).andExpect(content().string(containsString("MODE_LOCKED")));
     }
+    @Test void needsInputEndsNormallyWithoutAnErrorEvent() throws Exception {
+        var mockedSessions = org.mockito.Mockito.mock(AgentSessions.class);
+        var mockedSession = org.mockito.Mockito.mock(AgentSessions.Session.class);
+        var tools = new dev.learning.agent.tool.ToolRegistry();
+        var lease = new RunLease(new ExecutionRequest(java.util.UUID.randomUUID(), "hi", ModelSettings.defaults()),
+                AgentMode.REACT, (r,c) -> null, (r,t,c) -> new AssistantTurn("", List.of(), "stop"), tools, ignored -> {});
+        org.mockito.Mockito.when(mockedSessions.get("pending")).thenReturn(mockedSession);
+        org.mockito.Mockito.when(mockedSession.accept(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(lease);
+        org.mockito.Mockito.when(mockedSession.execute(org.mockito.ArgumentMatchers.eq(lease), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new RunResult(ExecutionStatus.NEEDS_INPUT, CompletionCheck.UNVERIFIED, "请确认地点", "NEEDS_INPUT", lease.context().budget().snapshot()));
+        MockMvc pendingMvc = MockMvcBuilders.standaloneSetup(new ChatController(mockedSessions, new ObjectMapper())).build();
+        try {
+            MvcResult started = pendingMvc.perform(chat("pending", "{\"prompt\":\"hi\"}")).andExpect(request().asyncStarted()).andReturn();
+            String output = pendingMvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            assertTrue(output.contains("NEEDS_INPUT")); assertTrue(output.contains("\"type\":\"done\""));
+            assertFalse(output.contains("\"type\":\"error\""));
+        } finally { lease.cancel("test cleanup"); }
+    }
+
     @Test void foreignOriginCannotApproveBash() throws Exception {
         mvc.perform(post("/api/approve").header("Origin", "http://other.example").contentType("application/json")
                 .content("{\"id\":\"approval\",\"approved\":true}"))

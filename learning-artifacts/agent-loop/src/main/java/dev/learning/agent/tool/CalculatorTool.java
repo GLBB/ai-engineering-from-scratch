@@ -16,6 +16,10 @@ public final class CalculatorTool implements AgentTool {
 
     public CalculatorTool(ObjectMapper json) { this.json = json; }
 
+    public ToolInput decode(String arguments) throws java.io.IOException {
+        return new CalculatorInput(ToolInputDecoder.oneString(arguments, "expression", 200));
+    }
+
     public ToolSpec definition() {
         return new ToolSpec("function", new FunctionSpec("calculator",
                 "Calculate basic arithmetic using +, -, *, / and parentheses.",

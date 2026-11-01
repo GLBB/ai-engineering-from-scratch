@@ -33,6 +33,10 @@ public final class SearchTool implements AgentTool {
         this.key = key;
     }
 
+    public ToolInput decode(String arguments) throws java.io.IOException {
+        return new SearchInput(ToolInputDecoder.oneString(arguments, "query", 500));
+    }
+
     public ToolSpec definition() {
         return new ToolSpec("function", new FunctionSpec("search",
                 "Search the public web using Exa and return titles, URLs, and short excerpts.",

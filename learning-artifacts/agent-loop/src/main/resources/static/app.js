@@ -21,7 +21,7 @@ const modeSelect = document.querySelector('#mode-select');
 const currentMode = document.querySelector('#current-mode');
 const modeHint = document.querySelector('#mode-hint');
 const newConversation = document.querySelector('#new-conversation');
-const statusNames = { COMPLETE: '已完成', PARTIAL: '部分完成', FAILED: '失败', CANCELLED: '已取消', SUCCESS: '成功', ERROR: '失败', DENIED: '已拒绝', TIMEOUT: '已超时', SKIPPED: '已跳过', INCOMPLETE: '未完成' };
+const statusNames = { NEEDS_INPUT: '待补充信息', COMPLETE: '已完成', PARTIAL: '部分完成', FAILED: '失败', CANCELLED: '已取消', SUCCESS: '成功', ERROR: '失败', DENIED: '已拒绝', TIMEOUT: '已超时', SKIPPED: '已跳过', INCOMPLETE: '未完成' };
 const phaseNames = { PLAN: '规划中', WORK: '执行工具', EXECUTE: '执行步骤', REPLAN: '检查下一步', REPAIR: '修复计划格式', SOLVE: '汇总回答', FINALIZE: '汇总回答' };
 const modeNames = { REACT: 'ReAct', REWOO: 'ReWOO', PLAN_EXECUTE: 'Plan-and-Execute' };
 let preferredMode = 'REACT';
@@ -200,6 +200,7 @@ async function sendPrompt(prompt, settings) {
   const answer = addMessage('assistant');
   let finished = false;
   const plans = new Map();
+  const sourceUrls = new Set();
   const phase = document.createElement('div');
   phase.className = 'phase-status';
   answer.body.prepend(phase);
@@ -225,6 +226,15 @@ async function sendPrompt(prompt, settings) {
       if (event.type === 'phase') phase.textContent = `${phaseNames[event.data.phase] || event.data.phase}${event.data.stepId ? ' · ' + event.data.stepId : ''} · 执行中`;
       if (event.type === 'plan') showPlan(answer.body, event.data, plans);
       if (event.type === 'evidence') {
+        for (const source of sourceLinks.accept(event.data.result.sources || [], sourceUrls)) {
+          const link = document.createElement('a');
+          link.className = 'tool-source';
+          link.href = source.url;
+          link.textContent = source.label;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          answer.body.append(link);
+        }
         const row = plans.get(event.data.stepId || event.data.id);
         if (row) row.status.textContent = statusNames[event.data.result.status] || event.data.result.status;
       }

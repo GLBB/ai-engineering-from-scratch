@@ -51,11 +51,13 @@ flowchart LR
 
 ## 为什么这样分
 
-执行策略通过共用 model、tool、runtime 能力协作。P&E 依赖 `core.react.ReActEngine` 来执行单个目标，但不依赖 ReWOO；两个规划模式读取 JSON 数组都调用 `StrictJson.strings`。`StrictJson` 只校验通用 JSON，工具名、参数类型和长度限制由 `tool.ToolInputDecoder` 负责。
+执行策略通过共用 model、tool、runtime 能力协作。P&E 依赖 `core.react.ReActEngine` 来执行单个目标，但不依赖 ReWOO；两个规划模式读取 JSON 数组都调用 `StrictJson.strings`。`StrictJson` 只校验通用 JSON，具体工具通过 AgentTool.decode 自主校验参数，tool.ToolInputDecoder 只提供通用字段读取；ToolRegistry 负责按名称路由解码。
 
 `model` 提供三个协议共用的内部契约，`deepseek.model` 保存外部报文类型。ProviderUsage 到 TokenUsage 的映射在协议包中完成，共享用量类型不反向导入 ProviderUsage。现有 ChatMessage、ToolSpec 仍保留 Jackson 注解和兼容字段，ModelSettings 仍限制当前 Demo 的 DeepSeek 模型；分包没有把这些类型改造成全新的多厂商抽象。
 
 `RunContext` 汇集本轮使用的服务，model/tool 的执行方法也接收它来消费预算、保存证据和发送事件，因此 runtime 与这些服务包会互相引用。这是同一个 Java 模块里的职责划分；没有把它们定义成只能单向依赖的独立模块。
+
+天气能力位于 `tool.weather`：两个工具适配 Agent，WeatherService/CityResolver 处理事实查询与地点消歧，OpenMeteoClient 处理 HTTP 和外部 DTO。算法包只依赖通用 ToolInput、目录和 ToolStatus，不导入天气类型。NEEDS_INPUT 表示等待用户补充，sources 元数据独立于最终模型文字展示。
 
 `RunLease` 留在 `app.chat`，因为它直接协调 HTTP 异步执行、EventSink 与 BrowserApproval。核心仍通过 ApprovalGateway 获取确认结果，无需了解浏览器交互。
 

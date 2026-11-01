@@ -38,14 +38,18 @@ public final class RewooRunner implements AgentRunner {
         ModelJson.phase(context, "PLAN", "running", null, 0);
         var validated = ModelJson.request(Prompts.read("rewoo-planner"), new PlannerInput(task, tools.definitions()),
                 request.settings(), new RunScope("PLAN", null, 0), context,
-                text -> RewooValidator.validate(RewooPlanParser.parse(text), names));
+                text -> RewooValidator.validate(RewooPlanParser.parse(text, tools), names));
         context.emit("plan", new ModelJson.PlanDisplay(AgentMode.REWOO, 0, validated.plan()));
         for (RewooPlan.Step step : validated.order()) {
             context.control().check();
             RunScope scope = new RunScope("WORK", step.id(), 0);
             ModelJson.phase(context, "WORK", "running", step.id(), 0);
+            if (context.needsInput()) {
+                DefaultToolExecutionService.skipped(step.tool(), StrictJson.write(step.arguments()), step.id(), scope, context, "awaiting user input");
+                continue;
+            }
             try {
-                ToolInput bound = EvidenceBinder.bind(step.arguments(), context.evidence());
+                ToolInput bound = EvidenceBinder.bind(step.arguments(), context.evidence(), tools);
                 context.tools().invoke(bound, step.id(), names, scope, context);
             } catch (IOException e) {
                 boolean dependencyFailed = validated.dependencies().get(step.id()).stream()
@@ -62,9 +66,9 @@ public final class RewooRunner implements AgentRunner {
                 request.settings(), new RunScope("SOLVE", null, 0), context, true);
         AnswerChecks.citations(answer.content(), validated.plan().answerEvidence(), context.evidence());
         ExecutionStatus status = AnswerChecks.status(validated.plan().answerEvidence(), context.evidence());
-        if (status == ExecutionStatus.COMPLETE || status == ExecutionStatus.PARTIAL) memory.commit(request.prompt(), answer.content());
+        if (status == ExecutionStatus.COMPLETE || status == ExecutionStatus.PARTIAL || status == ExecutionStatus.NEEDS_INPUT) memory.commit(request.prompt(), answer.content());
         return new RunResult(status, CompletionCheck.UNVERIFIED, answer.content(),
-                status == ExecutionStatus.FAILED ? "MISSING_EVIDENCE" : null, context.budget().snapshot());
+                status == ExecutionStatus.NEEDS_INPUT ? "NEEDS_INPUT" : status == ExecutionStatus.FAILED ? "MISSING_EVIDENCE" : null, context.budget().snapshot());
     }
 
     record PlannerInput(TaskInput task, List<ToolSpec> tools) {}

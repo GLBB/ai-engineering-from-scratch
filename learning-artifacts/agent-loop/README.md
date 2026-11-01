@@ -2,11 +2,13 @@
 
 这是学习 [The Agent Loop](../../phases/14-agent-engineering/01-the-agent-loop/docs/en.md) 与 [ReWOO / Plan-and-Execute](../../phases/14-agent-engineering/02-rewoo-plan-and-execute/docs/en.md) 后的 Java Maven 练习。在同一个界面中比较三种执行方式，模型、工具和协议客户端由三者共用。
 
-程序以 Spring Boot 提供本地浏览器聊天界面。回答会实时显示，工具包括四则运算、Bash 和 Exa 搜索。默认使用 `deepseek-flash`，思考模式关闭；可在输入框中切换模型和推理等级。每个浏览器页面拥有独立的内存会话；刷新页面会开始新会话。
+程序以 Spring Boot 提供本地浏览器聊天界面。回答会实时显示，工具包括四则运算、Bash、Exa 搜索，以及免注册的 Open-Meteo 当前天气和七日预报。默认使用 `deepseek-flash`，思考模式关闭；可在输入框中切换模型和推理等级。每个浏览器页面拥有独立的内存会话；刷新页面会开始新会话。
 
 想通过代码理解项目，可以从 [docs/Agent Loop 学习指南](docs/README.md) 开始，按顺序了解项目结构、一次对话的执行过程、协议适配和调试方法。
 
 [三模式技术方案](docs/design/agent-execution-technical-design.md) 是 ReAct / ReWOO / Plan-and-Execute 的统一开发依据，包含 Java 接口、执行算法、状态机、逐文件改动和验收计划；[研究记录](docs/design/agent-execution-research.md)保留来源与离线实测。模式在新对话首次发送前选择，接受后固定；三种模式均已实现；[实施验证](docs/design/agent-execution-research.md#实施后验证2026-11-01)记录本轮测试、真实接口矩阵和验证边界。
+
+[天气能力实现方案](docs/design/weather-capability-implementation-plan.md) 说明已接入的 Open-Meteo 当前天气与 1–7 天逐日预报，包含参数、地点消歧、通用工具扩展和实际验收记录。
 
 [三种协议图解](docs/06-three-protocols-by-example.md) 用同一次真实计算对话，逐项标注规则、用户、助手、工具结果和宿主程序，展示完整请求与响应，并解释 developer 与思考内容的归属。
 
@@ -78,7 +80,7 @@ flowchart TD
 | [`core/planning/`](src/main/java/dev/learning/agent/core/planning/) | 两种规划模式共用的任务快照、问答记忆、结构化模型请求和引用检查。 |
 | [`model/`](src/main/java/dev/learning/agent/model/) | 模型调用入口、Gateway，以及三种协议共用的消息、回复、工具描述和用量契约。 |
 | [`deepseek/`](src/main/java/dev/learning/agent/deepseek/) | 三个协议客户端、HTTP/SSE；`deepseek.model` 仅保留 ChatRequest、ChatChunk、ProviderUsage 协议 DTO。 |
-| [`tool/`](src/main/java/dev/learning/agent/tool/) | 工具参数和结果、ToolInputDecoder、注册与执行服务、三个具体工具。 |
+| [`tool/`](src/main/java/dev/learning/agent/tool/) | 通用参数契约、工具自主解码、注册与执行服务；天气能力位于 tool/weather。 |
 | [`support/json/`](src/main/java/dev/learning/agent/support/json/) | 严格 JSON 解析、字段读取与序列化；不认识具体工具或执行策略。 |
 | [`static/`](src/main/resources/static/) | 浏览器页面、样式、对话状态与轨迹脚本。 |
 | [`logback.xml`](src/main/resources/logback.xml) | 文件日志配置。 |
@@ -159,10 +161,27 @@ sequenceDiagram
 | 工具 | 参数与行为 | 主要边界 |
 | --- | --- | --- |
 | `calculator` | `expression`：支持 `+`、`-`、`*`、`/` 和括号。 | 限制表达式长度、嵌套深度和运算次数；非法表达式返回错误。 |
+| `current_weather` / `weather_forecast` | city、可选 country_code/admin1；预报可选 days=1–7。 | 地点不明先澄清，固定来源与单位；无需天气密钥。 |
 | `search` | `query`：通过 Exa 搜索，返回标题、URL 和摘要，最多请求 5 条。 | 查询最长 500 字符，HTTP 请求超时为 30 秒；缺少 key 时返回错误。 |
 | `bash` | `command`：在项目目录运行 Bash 命令。 | 执行前确认一次，输出发送给 DeepSeek 前再确认一次；最长 15 秒，捕获输出约 12 KB。子进程不继承 DeepSeek 和 Exa 的 API key。 |
 
 Bash 仍能访问当前用户有权限访问的本地文件，请在两次确认时检查命令和输出。工具执行顺序、循环次数和超时都可以从相应类中查看或修改。
+
+## 天气查询
+
+无需天气账号或 API key，直接提问：
+
+- `查询北京市（北京，中国，北京市）当前天气。`
+- `查询北京市未来七天逐日天气，列出日期、最低/最高温和降水概率。`
+- `比较北京市与上海市未来七天的天气。`
+
+`current_weather` 返回当前模型估计；`weather_forecast` 默认返回从城市当地今天起、包含今天的 7 天，days 可选 1–7 的整数。两个工具内部先查地点，再按经纬度查天气，使用摄氏度和 km/h；天气数据来自 Open-Meteo，地点数据来自 GeoNames，页面在回答下方展示来源链接。
+
+城市搜索可能返回重名地点。例如只说“北京”时，接口可能同时返回北京市、重庆市和四川的同名地点。工具不会按人口或第一条静默选择；无法确定时本轮显示“待补充信息”，输入省级地区后，在同一模式的新一轮继续查询。模型按工具描述提取 city、country_code、admin1，不应凭空补充行政区来绕过澄清。
+
+未来七天包含今天；“明天”使用返回的当地日期解释。关键数据缺失、服务限流、超时或查询失败会明确显示；非关键缺值保留为 null。整次天气调用最多 30 秒，单次完整 HTTP 响应最多 12 秒，正常一次工具调用包含两次 HTTP；受控城市名回退最多三次。当前天气是模型估计，不是气象站观测。
+
+Open-Meteo 免费接口用于非商业学习并要求注明来源。真实接口联调脚本见 `experiments/weather_matrix.py`；它还会调用已配置的 DeepSeek API。具体覆盖范围见[天气方案的实施记录](docs/design/weather-capability-implementation-plan.md#13-实施与验证2026-11-02)。
 
 ## 日志与排查
 
