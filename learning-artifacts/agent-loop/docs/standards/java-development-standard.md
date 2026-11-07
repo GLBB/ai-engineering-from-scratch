@@ -1,7 +1,6 @@
 # Java 项目规范入口
 
-适用范围：`learning-artifacts/agent-loop/`。通用流程见
-[Agent 开发与评审约定](agent-development-standard.md)。
+适用范围：`learning-artifacts/agent-loop/`。
 
 ## 1. 直接采用的官方规范
 
@@ -29,46 +28,32 @@ Google 评审指南只提供评审方法，不引入 Google Java Style 的两空
 - 项目禁止通配符导入、每行多条语句和一次声明多个变量；分支与循环使用大括号。
   这些明确的本地检查要求由下述 Checkstyle 配置执行。
 
-Java 的四空格缩进和 120 字符行宽按阿里手册执行。行宽目前通过评审检查，
-不能因为尚未接入自动检查而降为随意建议。Java 17 的文本块等手册未明确覆盖的语法，
+Java 的四空格缩进和 120 字符行宽按阿里手册执行，Spotless 负责排版，Checkstyle 负责检查。Java 17 的文本块等手册未明确覆盖的语法，
 结合语言语义与可读性评审，不能只为满足排版改变字符串内容。
 
 ## 3. 自动检查的实际范围
 
-- `.editorconfig` 提供 UTF-8、LF、Java 四空格等基础编辑器设置，不负责完整格式化。
-- `config/checkstyle.xml` 是本地 Checkstyle 规则唯一来源；Maven 插件固定为 3.6.0。
-- 当前配置覆盖方法和构造器空行、Tab、文件尾换行、通配符与无用导入、多变量声明、每行多语句和必要大括号。
-- 精确缩进、行宽、命名及其余适用的阿里手册条目仍需评审；检查通过不代表完整遵守手册。
-- 当前没有安装 P3C-PMD，也没有配置 Google Checkstyle 规则集。不得报告它们已运行。
-- Checkstyle 是显式命令，尚未绑定 Maven 生命周期或 CI；`mvn test` 不执行风格检查。
+项目已配置 Spotless 和 Checkstyle：前者使用固定来源的阿里官方 Eclipse 排版配置，
+后者使用本地维护的阿里风格规则子集。它们不代表完整覆盖阿里手册，也未安装 P3C-PMD。
+配置来源、覆盖范围、IDEA 使用方式及执行时机见[格式检查与执行时机](quality-checks.md)。
 
-在项目目录运行：
+在项目目录完成一个逻辑改动后运行：
 
 ```bash
-cd learning-artifacts/agent-loop
+python3 scripts/java_quality.py apply
+python3 scripts/java_quality.py check
 mvn test
-mvn checkstyle:check
 ```
 
-迁移期间，新增或修改的完整 Java 文件必须检查。路径相对于生产或测试源码根，
-多个路径用逗号分隔；确认模式确实匹配文件，空匹配不能作为通过证据。例如：
+提交评审前用 `check --base origin/main` 覆盖分支上已经提交的 Java 变更。
+全量构建与检查使用 `mvn -Pquality verify`。普通 `mvn test` 不执行格式检查；
+当前没有安装 Git hook，也未修改 CI 工作流，不能宣称平台已经强制执行。
 
-```bash
-mvn checkstyle:check \
-    -Dcheckstyle.includes='dev/learning/agent/observability/OtelTelemetryFactory.java'
-```
+## 4. 评审结论
 
-不要使用插件的 Google 默认规则替代当前项目配置。IDE 格式化也应遵守选定的阿里规范，
-不能各自采用默认风格。历史代码只在有明确范围的迁移中整理，避免混入业务修改。
+每条问题给出文件位置、规则或行为依据、影响与修复建议。编码问题引用采用版本的手册条目或项目补充，
+功能问题说明触发条件与错误结果。区分强制、推荐、参考级别和个人偏好，不把推荐项自动升级为阻塞项。
 
-## 4. 迁移与验证记录
-
-2026-11-07 的初次工作区审计：`mvn test` 运行 161 个测试，全部通过；
-现有 Checkstyle 子集在 114 个文件中报告 983 处违规，命令以失败退出。
-这是历史审计快照，不是完整阿里规范的审计结果，后续以重新运行结果为准。
-
-按包整理历史排版，每批运行风格检查和现有测试。全量通过后，再将检查绑定构建并接入 CI；
-不添加大范围豁免、不提高违规配额、不静默忽略失败。升级检查工具或扩展规则前先验证正反例。
-
-交付报告说明实际命令、检查范围、结果和未验证部分。真实模型或 Langfuse 的效果需要单独证据，
-不能用离线测试代替。评审问题的记录与阻塞标准见通用约定。
+适用的强制违规、确定的功能缺陷或必要检查失败时，不报告无条件通过。
+非阻塞建议明确标注；没有发现时如实说明，不制造问题凑数量。
+历史审计结果和迁移方式统一记录在[检查说明](quality-checks.md)，不在多份规范中重复维护。

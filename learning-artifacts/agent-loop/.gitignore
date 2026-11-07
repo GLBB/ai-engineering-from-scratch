@@ -4,3 +4,5 @@ target/
 *.iml
 logs/*.log
 logs/*.log.lck
+/tmp/*
+!/tmp/.gitkeep
