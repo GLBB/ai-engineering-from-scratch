@@ -1,6 +1,9 @@
 package dev.learning.agent.app.chat;
 
 import dev.learning.agent.app.settings.SettingsStore;
+import dev.learning.agent.app.settings.DeepSeekProperties;
+import dev.learning.agent.app.settings.ExaProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import dev.learning.agent.core.AgentMode;
 import dev.learning.agent.core.AgentRunner;
 import dev.learning.agent.core.ExecutionRequest;
@@ -39,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** A conversation shares context across modes and permits at most one active request. */
 @Service
+@EnableConfigurationProperties({DeepSeekProperties.class, ExaProperties.class})
 final class AgentSessions {
     private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
     private final ObjectMapper json = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
@@ -49,20 +53,18 @@ final class AgentSessions {
     private final TelemetryFactory telemetry;
 
     @org.springframework.beans.factory.annotation.Autowired
-    AgentSessions(SettingsStore settings, TelemetryFactory telemetry) {
+    AgentSessions(SettingsStore settings, TelemetryFactory telemetry, DeepSeekProperties deepSeek, ExaProperties exa) {
         this.telemetry = telemetry;
-        weather = new WeatherService(new OpenMeteoClient(json, telemetry.external()), java.time.Clock.systemUTC(), telemetry.external());
-        String key = System.getenv("DEEPSEEK_API_KEY");
-        if (key == null || key.isBlank()) throw new IllegalStateException("DEEPSEEK_API_KEY is required");
-        String baseUrl = System.getenv().getOrDefault("DEEPSEEK_BASE_URL", "https://api.deepseek.com");
+        weather = new WeatherService(new OpenMeteoClient(json, telemetry.external()), java.time.Clock.systemUTC(),
+            telemetry.external());
+        String key = deepSeek.apiKey();
+        String baseUrl = deepSeek.baseUrl();
         client = switch (settings.activeProtocol()) {
             case CHAT_COMPLETIONS -> new ChatCompletionsClient(json, key, baseUrl, telemetry.external());
             case RESPONSES -> new ResponsesClient(json, key, baseUrl, telemetry.external());
             case ANTHROPIC -> new AnthropicClient(json, key, baseUrl, telemetry.external());
         };
-        String configuredExaKey = System.getenv("EXA_AI_KEY");
-        exaKey = configuredExaKey == null || configuredExaKey.isBlank()
-                ? System.getenv("EXA_API_KEY") : configuredExaKey;
+        exaKey = exa.apiKey();
         Path current = Path.of("").toAbsolutePath().normalize();
         Path module = current.resolve("learning-artifacts/agent-loop");
         projectRoot = Files.isRegularFile(module.resolve("pom.xml")) ? module : current;
@@ -81,13 +83,18 @@ final class AgentSessions {
     // Test constructor uses the exact same Session and runner factory without remote credentials.
     AgentSessions(ChatModel client, Path projectRoot, String exaKey) {
         this(client, projectRoot, exaKey,
-                new WeatherService(new OpenMeteoClient(new ObjectMapper()), java.time.Clock.systemUTC()));
+            new WeatherService(new OpenMeteoClient(new ObjectMapper()), java.time.Clock.systemUTC()));
     }
+
     AgentSessions(ChatModel client, Path projectRoot, String exaKey, WeatherService weather) {
         this(client, projectRoot, exaKey, weather, TelemetryFactory.NOOP);
     }
-    AgentSessions(ChatModel client, Path projectRoot, String exaKey, WeatherService weather, TelemetryFactory telemetry) {
-        this.client = client; this.projectRoot = projectRoot; this.exaKey = exaKey;
+
+    AgentSessions(ChatModel client, Path projectRoot, String exaKey, WeatherService weather,
+        TelemetryFactory telemetry) {
+        this.client = client;
+        this.projectRoot = projectRoot;
+        this.exaKey = exaKey;
         this.weather = weather;
         this.telemetry = telemetry;
     }
@@ -109,29 +116,49 @@ final class AgentSessions {
             tools.register(new CurrentWeatherTool(weather));
             tools.register(new WeatherForecastTool(weather));
         }
-        String id() { return id; }
+
+        String id() {
+            return id;
+        }
+
         synchronized RunLease accept(String prompt, ModelSettings settings, AgentMode requested) {
-            if (prompt == null || prompt.isBlank() || prompt.length() > 10_000 || settings == null)
-                throw new ApiFailure(400, "INVALID_REQUEST", "A nonblank prompt of at most 10000 characters is required.");
-            if (activeRun != null) throw new ApiFailure(409, "RUN_IN_PROGRESS", "This conversation is already running.");
+            if (prompt == null || prompt.isBlank() || prompt.length() > 10_000 || settings == null) {
+                throw new ApiFailure(400, "INVALID_REQUEST",
+                    "A nonblank prompt of at most 10000 characters is required.");
+            }
+            if (activeRun != null) {
+                throw new ApiFailure(409, "RUN_IN_PROGRESS", "This conversation is already running.");
+            }
             AgentMode selected = requested != null ? requested : lastMode != null ? lastMode : AgentMode.REACT;
             AgentRunner candidate = runner != null && lastMode == selected ? runner : createRunner(selected);
             var request = new ExecutionRequest(UUID.randomUUID(), prompt, settings);
             var trace = telemetry.open(telemetrySessionId, request, selected, client.protocol());
-            if (contentRestricted) trace.restrictContent();
-            RunLease lease = new RunLease(request, selected, remembering(candidate), client, tools, this::release, trace);
-            lastMode = selected; runner = candidate; activeRun = lease;
+            if (contentRestricted) {
+                trace.restrictContent();
+            }
+            RunLease lease =
+                new RunLease(request, selected, remembering(candidate), client, tools, this::release, trace);
+            lastMode = selected;
+            runner = candidate;
+            activeRun = lease;
             lease.arm();
             return lease;
         }
+
         RunResult execute(RunLease lease, EventSink events) throws Exception {
-            synchronized (this) { if (activeRun != lease) return null; }
+            synchronized (this) {
+                if (activeRun != lease) {
+                    return null;
+                }
+            }
             return lease.execute(events);
         }
+
         synchronized SessionStatus status() {
             return new SessionStatus(id, java.util.List.of(AgentMode.values()), AgentMode.REACT, lastMode,
-                    activeRun != null, activeRun == null ? null : activeRun.requestId());
+                activeRun != null, activeRun == null ? null : activeRun.requestId());
         }
+
         private AgentRunner createRunner(AgentMode selected) {
             var history = memory.history();
             return switch (selected) {
@@ -140,6 +167,7 @@ final class AgentSessions {
                 case PLAN_EXECUTE -> new PlanExecuteRunner(tools, new DefaultReActEngine(tools), history);
             };
         }
+
         private AgentRunner remembering(AgentRunner selected) {
             return (request, context) -> {
                 RunResult result;
@@ -147,7 +175,7 @@ final class AgentSessions {
                     result = selected.run(request, context);
                 } catch (java.io.IOException | InterruptedException | RuntimeException error) {
                     ExecutionStatus status = error instanceof InterruptedException || context.control().cancelled()
-                            ? ExecutionStatus.CANCELLED : ExecutionStatus.FAILED;
+                        ? ExecutionStatus.CANCELLED : ExecutionStatus.FAILED;
                     remember(request.prompt(), "", status, context);
                     throw error;
                 }
@@ -155,21 +183,30 @@ final class AgentSessions {
                 return result;
             };
         }
+
         private synchronized void remember(String question, String answer, ExecutionStatus status, RunContext context) {
             contentRestricted |= context.telemetry().contentRestricted();
             var operations = context.evidence().snapshot().stream()
-                    .map(e -> new TaskInput.ToolOutcome(e.tool(), e.result().status(), e.result().executed())).toList();
+                .map(e -> new TaskInput.ToolOutcome(e.tool(), e.result().status(), e.result().executed())).toList();
             memory.commit(new TaskInput.ConversationTurn(question, answer, status, operations));
         }
+
         boolean decide(String approvalId, boolean approved) {
             RunLease current;
-            synchronized (this) { current = activeRun; }
+            synchronized (this) {
+                current = activeRun;
+            }
             return current != null && current.decide(approvalId, approved);
         }
+
         private synchronized void release(RunLease expected) {
-            if (activeRun == expected) activeRun = null;
+            if (activeRun == expected) {
+                activeRun = null;
+            }
         }
     }
+
     record SessionStatus(String sessionId, java.util.List<AgentMode> supportedModes, AgentMode defaultMode,
-                         AgentMode mode, boolean running, UUID activeRequestId) {}
+        AgentMode mode, boolean running, UUID activeRequestId) {
+    }
 }

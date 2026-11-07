@@ -17,6 +17,12 @@ logging:
     org.springframework.web: INFO
 
 agent:
+  deepseek:
+    api-key: ${DEEPSEEK_API_KEY:}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+  exa:
+    api-key: ${EXA_AI_KEY:}
+    fallback-api-key: ${EXA_API_KEY:}
   tracing:
     enabled: ${AGENT_TRACING_ENABLED:true}
     sample-ratio: ${AGENT_TRACE_SAMPLE_RATIO:1.0}

@@ -50,13 +50,15 @@ mvn spring-boot:run
 
 ### 开启 Langfuse Trace
 
-本机已创建独立的 `agent-loop-learning` 项目，配置保存在仓库外的 `~/.config/langfuse/agent-loop.env`（权限 `0600`）。DeepSeek key 仍从启动进程的环境读取：
+本机已创建独立的 `agent-loop-learning` 项目，配置保存在仓库外的 `~/.config/langfuse/agent-loop.env`（权限 `0600`）。DeepSeek key 通过 YAML 环境变量占位符绑定：
 
 ```bash
 ./run-with-tracing.sh
 ```
 
 Trace 默认开启；启动前需要提供 Langfuse 凭据。脚本加载私有配置并启动应用；其他机器可用 `AGENT_TRACE_ENV_FILE` 指定自己的环境文件。开启后每轮回答与轨迹摘要显示 Trace 链接，跳转本机 Langfuse 查看执行树。同一对话可以逐轮切换执行模式，每轮独立建 trace，通过观测 Session ID 分组。
+
+DeepSeek 配置集中在 [`application.yml`](src/main/resources/application.yml) 的 `agent.deepseek` 下，绑定到 `DeepSeekProperties`；`api-key` 必填，`base-url` 默认 `https://api.deepseek.com`。Exa 配置在 `agent.exa` 下，绑定到 `ExaProperties`，保留 `EXA_AI_KEY` 非空时优先、否则回退到 `EXA_API_KEY` 的行为。可通过外部 `application.yml` 或 Spring 参数（例如 `--agent.deepseek.base-url=https://gateway.example.com`）覆盖。真实密钥只放环境变量或仓库外私有配置文件，不写入已提交的 YAML。
 
 Trace 配置集中在 [`application.yml`](src/main/resources/application.yml) 的 `agent.tracing` 下，由 Spring 绑定到 `TracingProperties`。可以直接修改 YAML，也可以使用 Spring 命令行参数覆盖，例如 `--agent.tracing.enabled=true`；表中的环境变量由 YAML 占位符读取。
 
@@ -230,7 +232,7 @@ tail -f logs/agent.log
 
 打开本目录的 `pom.xml`，选择 **Open as Project**，使用 WSL JDK 作为 Project SDK。若已打开整个仓库，可在 Maven 工具窗口选择 **Link Maven Projects** 并选中这个 `pom.xml`。同步后，运行 [`WebMain.java`](src/main/java/dev/learning/agent/app/WebMain.java) 的 `main` 方法，即可启动浏览器服务。
 
-模型与搜索客户端目前使用 `System.getenv` 读取启动 Java 进程时已有的环境变量；Trace 配置由 Spring 解析 `application.yml` 中的环境变量占位符。WSL 交互式 Bash 会读取 `~/.bashrc`，IDEA 的运行进程可能由其他环境启动，因此终端里有 key 并不代表运行配置也有。不要在终端打印 key 来排查；可用下面的命令只检查是否存在：
+模型、搜索和 Trace 配置统一由 Spring 解析 `application.yml` 中的环境变量占位符并绑定注入，也支持外部配置文件覆盖。WSL 交互式 Bash 会读取 `~/.bashrc`，IDEA 的运行进程可能由其他环境启动，因此终端里有 key 并不代表运行配置也有。不要在终端打印 key 来排查；可用下面的命令只检查是否存在：
 
 ```bash
 if [ -n "$DEEPSEEK_API_KEY" ]; then echo "DeepSeek key 已设置"; else echo "DeepSeek key 未设置"; fi
@@ -243,7 +245,7 @@ if [ -n "$DEEPSEEK_API_KEY" ]; then echo "DeepSeek key 已设置"; else echo "De
 1. **使用 IDEA 的 WSL 终端：**在本项目目录执行 `mvn spring-boot:run`。交互式 Bash 已加载 `.bashrc`，可以继承已有的 key。
 2. **使用 Java 的运行按钮：**为 `WebMain` 配置环境变量。本地 `Agent Loop (WSL)` 运行配置已指向 `WebMain`，并从被 Git 忽略的 `.idea/agent-loop.env` 读取密钥；更新 key 后也需更新此文件。也可以在 **Run → Edit Configurations → Environment variables** 中直接配置。请勿将包含 key 的配置共享或提交。
 
-IDEA 从 `WebMain` 旁的运行按钮自动生成的新配置不会自动继承另一份配置的环境变量文件。如果启动时出现 `DEEPSEEK_API_KEY is required`，在当前选中的配置中添加 `.idea/agent-loop.env`，或改选已配置该文件的 `Agent Loop (WSL)`。本机当前选中的 `WebMain` 配置也已补上该环境文件。
+IDEA 从 `WebMain` 旁的运行按钮自动生成的新配置不会自动继承另一份配置的环境变量文件。如果启动时出现 `agent.deepseek.api-key is required (DEEPSEEK_API_KEY)`，在当前选中的配置中添加 `.idea/agent-loop.env`，或改选已配置该文件的 `Agent Loop (WSL)`。本机当前选中的 `WebMain` 配置也已补上该环境文件。
 
 终端方式已在当前 WSL 环境验证；IDEA 运行按钮的环境需要在 IDE 中配置并验证。IDEA 还提供 WSL 环境变量加载相关的高级选项，但不同安装环境中选项可能不可见，以上两种方式不依赖该选项。
 

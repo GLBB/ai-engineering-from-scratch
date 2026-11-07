@@ -4,7 +4,7 @@
 
 ## 启动前准备
 
-需要 Java 17 或更高版本、Maven 和 DeepSeek API key。`DEEPSEEK_API_KEY` 从启动 Java 进程的环境读取；搜索工具使用 `EXA_AI_KEY`，也接受 `EXA_API_KEY`。没有 Exa key 时，其余功能仍可使用。
+需要 Java 17 或更高版本、Maven 和 DeepSeek API key。连接配置统一在 `src/main/resources/application.yml` 中定义，通过 Spring 绑定注入；`DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`EXA_AI_KEY` 和 `EXA_API_KEY` 由 YAML 占位符读取，也可通过外部配置文件覆盖。搜索优先使用非空的 `EXA_AI_KEY`，否则回退到 `EXA_API_KEY`。没有 Exa key 时，其余功能仍可使用。
 
 在本项目目录运行：
 
