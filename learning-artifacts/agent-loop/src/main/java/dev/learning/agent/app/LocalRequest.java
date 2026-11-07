@@ -4,7 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 
 /** Checks the host and origin of browser requests to the local application. */
 public final class LocalRequest {
-    private LocalRequest() {}
+    private LocalRequest() {
+    }
 
     public static boolean isLocalHost(HttpServletRequest request) {
         String host = request.getServerName();
@@ -12,7 +13,9 @@ public final class LocalRequest {
     }
 
     public static boolean hasSameOrigin(HttpServletRequest request) {
-        if (!isLocalHost(request)) return false;
+        if (!isLocalHost(request)) {
+            return false;
+        }
         String expected = request.getScheme() + "://" + request.getServerName() + ":" + request.getServerPort();
         return expected.equals(request.getHeader("Origin"));
     }

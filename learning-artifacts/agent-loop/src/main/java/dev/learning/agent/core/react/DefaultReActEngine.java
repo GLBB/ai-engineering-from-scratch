@@ -18,19 +18,26 @@ import java.util.List;
 /** Stateless feedback loop used for whole conversations and individual P&E steps. */
 public final class DefaultReActEngine implements ReActEngine {
     private final ToolRegistry tools;
-    public DefaultReActEngine(ToolRegistry tools) { this.tools = tools; }
+
+    public DefaultReActEngine(ToolRegistry tools) {
+        this.tools = tools;
+    }
 
     public EngineResult execute(EngineRequest request, RunContext context) throws IOException, InterruptedException {
         List<ChatMessage> transcript = new ArrayList<>(request.transcript());
         request.onCheckpoint().accept(List.copyOf(transcript));
         int attempted = 0;
         var definitions = tools.definitions().stream()
-                .filter(tool -> request.allowedTools().contains(tool.function().name())).toList();
+            .filter(tool -> request.allowedTools().contains(tool.function().name())).toList();
         for (int round = 0; round < request.maxModelCalls(); round++) {
             context.control().check();
-            var modelRequest = new ModelRequest(transcript, request.settings(), definitions, OutputMode.TEXT, 4096, ModelUse.EXECUTOR);
-            var answer = context.model().call(modelRequest, request.scope(),
-                    part -> { if (request.publishText()) context.emit("text", part); }, context);
+            var modelRequest =
+                new ModelRequest(transcript, request.settings(), definitions, OutputMode.TEXT, 4096, ModelUse.EXECUTOR);
+            var answer = context.model().call(modelRequest, request.scope(), part -> {
+                if (request.publishText()) {
+                    context.emit("text", part);
+                }
+            }, context);
             validateIds(answer.calls());
             if (answer.calls().isEmpty()) {
                 transcript.add(ChatMessage.assistant(answer));
@@ -42,10 +49,15 @@ public final class DefaultReActEngine implements ReActEngine {
                 String id = context.evidence().nextId();
                 Evidence evidence;
                 boolean cancelled = Thread.currentThread().isInterrupted();
-                try { context.control().check(); } catch (InterruptedException e) { cancelled = true; }
+                try {
+                    context.control().check();
+                } catch (InterruptedException e) {
+                    cancelled = true;
+                }
                 if (cancelled || context.needsInput() || attempted >= request.maxToolAttempts()) {
                     evidence = DefaultToolExecutionService.skipped(call.function().name(), call.function().arguments(),
-                            id, request.scope(), context, cancelled ? "run cancelled; not executed" : context.needsInput() ? "awaiting user input; not executed" : "local tool limit; not executed");
+                        id, request.scope(), context, cancelled ? "run cancelled; not executed" : context.needsInput()
+                            ? "awaiting user input; not executed" : "local tool limit; not executed");
                 } else {
                     attempted++;
                     evidence = context.tools().invokeNative(call, id, request.allowedTools(), request.scope(), context);
@@ -56,7 +68,9 @@ public final class DefaultReActEngine implements ReActEngine {
             transcript.addAll(results);
             request.onCheckpoint().accept(List.copyOf(transcript));
             context.control().check();
-            if (context.needsInput()) return new EngineResult(transcript, null, EngineStop.NEEDS_INPUT);
+            if (context.needsInput()) {
+                return new EngineResult(transcript, null, EngineStop.NEEDS_INPUT);
+            }
         }
         return new EngineResult(transcript, null, EngineStop.LOCAL_BUDGET);
     }

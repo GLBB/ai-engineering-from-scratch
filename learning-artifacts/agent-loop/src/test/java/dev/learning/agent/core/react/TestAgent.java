@@ -26,10 +26,12 @@ final class TestAgent {
     private final Consumer<TraceEvent> trace;
 
     TestAgent(ChatModel model, ToolRegistry tools, int max, Consumer<String> text, Consumer<String> tool) {
-        this(model, tools, max, text, tool, ignored -> {});
+        this(model, tools, max, text, tool, ignored -> {
+        });
     }
-    TestAgent(ChatModel model, ToolRegistry tools, int max, Consumer<String> text,
-              Consumer<String> tool, Consumer<TraceEvent> trace) {
+
+    TestAgent(ChatModel model, ToolRegistry tools, int max, Consumer<String> text, Consumer<String> tool,
+        Consumer<TraceEvent> trace) {
         this.model = model;
         this.tools = tools;
         this.runner = new ReActRunner(new DefaultReActEngine(tools), max);
@@ -37,6 +39,7 @@ final class TestAgent {
         this.tool = tool;
         this.trace = trace;
     }
+
     void run(String prompt, ModelSettings settings) throws IOException, InterruptedException {
         UUID id = UUID.randomUUID();
         RunContext context = RunContexts.create(id, AgentMode.REACT, model, tools, event -> {
@@ -45,12 +48,17 @@ final class TestAgent {
                 case "text" -> text.accept((String) data.data());
                 case "tool" -> tool.accept((String) data.data());
                 case "trace" -> trace.accept((TraceEvent) data.data());
-                default -> { }
+                default -> {
+                }
             }
         }, (kind, content, scope, control) -> false);
         try {
             RunResult result = runner.run(new ExecutionRequest(id, prompt, settings), context);
-            if (result.status() != ExecutionStatus.COMPLETE) throw new IOException(result.answer());
-        } finally { context.control().close(); }
+            if (result.status() != ExecutionStatus.COMPLETE) {
+                throw new IOException(result.answer());
+            }
+        } finally {
+            context.control().close();
+        }
     }
 }

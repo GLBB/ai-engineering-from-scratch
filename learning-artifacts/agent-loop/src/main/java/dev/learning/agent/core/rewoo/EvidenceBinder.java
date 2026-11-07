@@ -14,7 +14,9 @@ import java.util.regex.Pattern;
 
 public final class EvidenceBinder {
     private static final Pattern REFERENCES = Pattern.compile("#E[0-9]*");
-    private EvidenceBinder() {}
+
+    private EvidenceBinder() {
+    }
 
     public static Set<String> references(ToolInput input) throws PlanValidationException {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
@@ -22,7 +24,9 @@ public final class EvidenceBinder {
             Matcher matcher = REFERENCES.matcher(text);
             while (matcher.find()) {
                 String id = matcher.group().substring(1);
-                if (!id.matches("E[1-9][0-9]*")) throw new PlanValidationException("invalid evidence reference " + matcher.group());
+                if (!id.matches("E[1-9][0-9]*")) {
+                    throw new PlanValidationException("invalid evidence reference " + matcher.group());
+                }
                 ids.add(id);
             }
         }
@@ -33,7 +37,9 @@ public final class EvidenceBinder {
         try {
             ToolInput bound = template.mapStrings(text -> replace(text, store));
             return tools.decode(bound.toolName(), StrictJson.write(bound));
-        } catch (IllegalArgumentException failure) { throw new PlanValidationException(failure.getMessage()); }
+        } catch (IllegalArgumentException failure) {
+            throw new PlanValidationException(failure.getMessage());
+        }
     }
 
     private static String replace(String text, EvidenceStore store) {

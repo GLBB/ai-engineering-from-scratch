@@ -6,7 +6,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BrowserApprovalTest {
     @Test
@@ -31,8 +34,8 @@ class BrowserApprovalTest {
     @Test
     void outputNeedsItsOwnDecision() throws Exception {
         LinkedBlockingQueue<BrowserApproval.ApprovalEvent> events = new LinkedBlockingQueue<>();
-        BrowserApproval approval = new BrowserApproval((type, data) ->
-                events.add((BrowserApproval.ApprovalEvent) data));
+        BrowserApproval approval =
+            new BrowserApproval((type, data) -> events.add((BrowserApproval.ApprovalEvent) data));
 
         CompletableFuture<Boolean> answer = CompletableFuture.supplyAsync(() -> approval.approveOutput("secret"));
         BrowserApproval.ApprovalEvent event = events.poll(2, TimeUnit.SECONDS);
@@ -46,8 +49,8 @@ class BrowserApprovalTest {
     @Test
     void cancellationRejectsPendingCommand() throws Exception {
         LinkedBlockingQueue<BrowserApproval.ApprovalEvent> events = new LinkedBlockingQueue<>();
-        BrowserApproval approval = new BrowserApproval((type, data) ->
-                events.add((BrowserApproval.ApprovalEvent) data));
+        BrowserApproval approval =
+            new BrowserApproval((type, data) -> events.add((BrowserApproval.ApprovalEvent) data));
 
         CompletableFuture<Boolean> answer = CompletableFuture.supplyAsync(() -> approval.approveCommand("pwd"));
         assertNotNull(events.poll(2, TimeUnit.SECONDS));

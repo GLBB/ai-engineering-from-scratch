@@ -13,7 +13,9 @@ public final class InMemoryEvidenceStore implements EvidenceStore {
 
     public String nextId() {
         String id;
-        do { id = "E" + ++sequence; } while (entries.containsKey(id));
+        do {
+            id = "E" + ++sequence;
+        } while (entries.containsKey(id));
         return id;
     }
 
@@ -25,12 +27,14 @@ public final class InMemoryEvidenceStore implements EvidenceStore {
 
     public Evidence requireUsable(String id) {
         Evidence found = entries.get(id);
-        if (found == null || found.result().status() != ToolStatus.SUCCESS
-                || !found.result().hasValue() || found.result().truncated()) {
+        if (found == null || found.result().status() != ToolStatus.SUCCESS || !found.result().hasValue()
+            || found.result().truncated()) {
             throw new IllegalArgumentException("unusable evidence: " + id);
         }
         return found;
     }
 
-    public List<Evidence> snapshot() { return List.copyOf(entries.values()); }
+    public List<Evidence> snapshot() {
+        return List.copyOf(entries.values());
+    }
 }

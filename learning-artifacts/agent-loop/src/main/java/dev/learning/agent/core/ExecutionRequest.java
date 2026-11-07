@@ -4,4 +4,5 @@ import dev.learning.agent.model.ModelSettings;
 
 import java.util.UUID;
 
-public record ExecutionRequest(UUID requestId, String prompt, ModelSettings settings) {}
+public record ExecutionRequest(UUID requestId, String prompt, ModelSettings settings) {
+}

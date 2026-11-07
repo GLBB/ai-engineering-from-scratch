@@ -19,6 +19,7 @@ final class BrowserApproval {
     BrowserApproval(EventSink sink) {
         this(sink, ExternalObserver.NOOP);
     }
+
     BrowserApproval(EventSink sink, ExternalObserver observer) {
         this.sink = sink;
         this.observer = observer;
@@ -42,25 +43,39 @@ final class BrowserApproval {
             return waitForDecision(kind, content, scope, control, span);
         }
     }
+
     private boolean waitForDecision(String kind, String content, RunScope scope, RunControl control, TraceSpan span) {
         Pending request = new Pending(UUID.randomUUID().toString(), new CompletableFuture<>());
-        if (!pending.compareAndSet(null, request)) return false;
-        AutoCloseable registration = control == null ? () -> {} : control.onCancel(() -> request.decision().complete(false));
+        if (!pending.compareAndSet(null, request)) {
+            return false;
+        }
+        AutoCloseable registration = control == null ? () -> {
+        } : control.onCancel(() -> request.decision().complete(false));
         try {
-            if (control != null) control.check();
-            sink.emit("approval", new ApprovalEvent(request.id(), kind, content, scope == null ? null : scope.stepId()));
-            boolean approved = request.decision().get(control == null ? 300_000 : Math.min(300_000, control.remaining().toMillis()), TimeUnit.MILLISECONDS);
-            span.attribute("agent_loop.approval.outcome", control != null && control.cancelled() ? "cancelled" : approved ? "approved" : "denied");
+            if (control != null) {
+                control.check();
+            }
+            sink.emit("approval",
+                new ApprovalEvent(request.id(), kind, content, scope == null ? null : scope.stepId()));
+            boolean approved = request.decision().get(
+                control == null ? 300_000 : Math.min(300_000, control.remaining().toMillis()), TimeUnit.MILLISECONDS);
+            span.attribute("agent_loop.approval.outcome",
+                control != null && control.cancelled() ? "cancelled" : approved ? "approved" : "denied");
             return approved;
         } catch (Exception e) {
-            span.attribute("agent_loop.approval.outcome", e instanceof java.util.concurrent.TimeoutException ? "expired" : "cancelled");
+            span.attribute("agent_loop.approval.outcome",
+                e instanceof java.util.concurrent.TimeoutException ? "expired" : "cancelled");
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
             return false;
         } finally {
             pending.compareAndSet(request, null);
-            try { registration.close(); } catch (Exception ignored) { /* Unregister only. */ }
+            try {
+                registration.close();
+            } catch (Exception ignored) {
+                /* Unregister only. */
+            }
         }
     }
 
@@ -76,6 +91,9 @@ final class BrowserApproval {
         }
     }
 
-    record ApprovalEvent(String id, String kind, String content, String stepId) {}
-    private record Pending(String id, CompletableFuture<Boolean> decision) {}
+    record ApprovalEvent(String id, String kind, String content, String stepId) {
+    }
+
+    private record Pending(String id, CompletableFuture<Boolean> decision) {
+    }
 }

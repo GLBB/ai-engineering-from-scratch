@@ -38,21 +38,25 @@ public final class AnthropicClient implements ChatModel {
     public AnthropicClient(ObjectMapper json, String key, String baseUrl) {
         this(json, key, baseUrl, ExternalObserver.NOOP);
     }
+
     public AnthropicClient(ObjectMapper json, String key, String baseUrl, ExternalObserver observer) {
         this.json = json.copy().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         this.http = new StreamingHttp(this.json, key, baseUrl, "/anthropic/v1/messages", observer);
     }
 
     @Override
-    public String protocol() { return "Anthropic Messages"; }
+    public String protocol() {
+        return "Anthropic Messages";
+    }
 
     @Override
     public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control)
-            throws IOException, InterruptedException {
+        throws IOException, InterruptedException {
         return stream(modelRequest, onText, control, ModelStreamObserver.NOOP);
     }
-    public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control, ModelStreamObserver observer)
-            throws IOException, InterruptedException {
+
+    public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control,
+        ModelStreamObserver observer) throws IOException, InterruptedException {
         try (InputStream input = http.send(request(modelRequest), control)) {
             return read(input, onText, observer);
         }
@@ -76,8 +80,8 @@ public final class AnthropicClient implements ChatModel {
                 List<Block> toolResults = new ArrayList<>();
                 do {
                     ChatMessage tool = messages.get(i);
-                    toolResults.add(new Block("tool_result", null, null, null, null, null, null,
-                            tool.toolCallId(), tool.content()));
+                    toolResults.add(new Block("tool_result", null, null, null, null, null, null, tool.toolCallId(),
+                        tool.content()));
                     i++;
                 } while (i < messages.size() && "tool".equals(messages.get(i).role()));
                 i--;
@@ -88,12 +92,13 @@ public final class AnthropicClient implements ChatModel {
                 result.add(new Message(message.role(), List.of(textBlock(message.content()))));
             }
         }
-        List<Function> functions = tools.stream().map(tool -> new Function(tool.function().name(),
-                tool.function().description(), tool.function().parameters())).toList();
+        List<Function> functions = tools.stream().map(
+            tool -> new Function(tool.function().name(), tool.function().description(), tool.function().parameters()))
+            .toList();
         return new Request(settings.model(), system, result, true,
-                new Thinking(settings.thinking() ? "enabled" : "disabled"),
-                settings.thinking() ? new OutputConfig(settings.reasoningLevel()) : null,
-                functions.isEmpty() ? null : functions, modelRequest.maxOutputTokens());
+            new Thinking(settings.thinking() ? "enabled" : "disabled"),
+            settings.thinking() ? new OutputConfig(settings.reasoningLevel()) : null,
+            functions.isEmpty() ? null : functions, modelRequest.maxOutputTokens());
     }
 
     private List<Block> assistantBlocks(ChatMessage message) throws IOException {
@@ -101,19 +106,21 @@ public final class AnthropicClient implements ChatModel {
         if (message.blocks() != null) {
             for (AssistantBlock block : message.blocks()) {
                 JsonNode input = block.input() == null ? null : json.readTree(block.input());
-                blocks.add(new Block(block.type(), block.text(), block.thinking(), block.signature(),
-                        block.id(), block.name(), input, null, null));
+                blocks.add(new Block(block.type(), block.text(), block.thinking(), block.signature(), block.id(),
+                    block.name(), input, null, null));
             }
             return blocks;
         }
         if (message.reasoningContent() != null) {
             blocks.add(new Block("thinking", null, message.reasoningContent(), null, null, null, null, null, null));
         }
-        if (message.content() != null && !message.content().isBlank()) blocks.add(textBlock(message.content()));
+        if (message.content() != null && !message.content().isBlank()) {
+            blocks.add(textBlock(message.content()));
+        }
         if (message.toolCalls() != null) {
             for (ToolCall call : message.toolCalls()) {
                 blocks.add(new Block("tool_use", null, null, null, call.id(), call.function().name(),
-                        json.readTree(call.function().arguments()), null, null));
+                    json.readTree(call.function().arguments()), null, null));
             }
         }
         return blocks;
@@ -126,6 +133,7 @@ public final class AnthropicClient implements ChatModel {
     AssistantTurn read(InputStream input, Consumer<String> onText) throws IOException {
         return read(input, onText, ModelStreamObserver.NOOP);
     }
+
     AssistantTurn read(InputStream input, Consumer<String> onText, ModelStreamObserver observer) throws IOException {
         Map<Integer, BlockBuilder> blocks = new TreeMap<>();
         String[] stopReason = new String[1];
@@ -153,33 +161,51 @@ public final class AnthropicClient implements ChatModel {
                     }
                     blocks.put(start.index(), new BlockBuilder(start.contentBlock()));
                     Block initial = start.contentBlock();
-                    if (initial.text() != null && !initial.text().isEmpty()) observer.chunk(true);
-                    else if ("tool_use".equals(initial.type()) || initial.thinking() != null && !initial.thinking().isEmpty()) observer.chunk(false);
+                    if (initial.text() != null && !initial.text().isEmpty()) {
+                        observer.chunk(true);
+                    } else if ("tool_use".equals(initial.type())
+                        || initial.thinking() != null && !initial.thinking().isEmpty()) {
+                        observer.chunk(false);
+                    }
                 }
                 case "content_block_delta" -> {
                     BlockDelta part = json.readValue(data, BlockDelta.class);
                     BlockBuilder block = blocks.get(part.index());
-                    if (block == null || part.delta() == null) throw new IOException("missing Anthropic content block");
+                    if (block == null || part.delta() == null) {
+                        throw new IOException("missing Anthropic content block");
+                    }
                     Delta delta = part.delta();
-                    if (delta.text() != null && !delta.text().isEmpty()) observer.chunk(true);
-                    else if (delta.thinking() != null && !delta.thinking().isEmpty()
-                            || delta.partialJson() != null && !delta.partialJson().isEmpty()) observer.chunk(false);
+                    if (delta.text() != null && !delta.text().isEmpty()) {
+                        observer.chunk(true);
+                    } else if (delta.thinking() != null && !delta.thinking().isEmpty()
+                        || delta.partialJson() != null && !delta.partialJson().isEmpty()) {
+                        observer.chunk(false);
+                    }
                     block.append(delta, onText);
                 }
                 case "message_delta" -> {
                     MessageDelta part = json.readValue(data, MessageDelta.class);
                     usage[0] = TokenUsage.merge(usage[0], ProviderUsage.toAnthropicUsage(part.usage()));
-                    if (part.usage() != null) observer.usage(usage[0], part.delta() != null && part.delta().stopReason() != null);
-                    if (part.delta() != null && part.delta().stopReason() != null) stopReason[0] = part.delta().stopReason();
+                    if (part.usage() != null) {
+                        observer.usage(usage[0], part.delta() != null && part.delta().stopReason() != null);
+                    }
+                    if (part.delta() != null && part.delta().stopReason() != null) {
+                        stopReason[0] = part.delta().stopReason();
+                    }
                 }
                 case "message_stop" -> done[0] = true;
-                default -> { }
+                default -> {
+                }
             }
-            int characters = blocks.values().stream().mapToInt(block -> block.text.length()
-                    + block.thinking.length() + block.input.length() + block.signature.length()).sum();
-            if (characters > 16_000) throw new IOException("model output too large");
+            int characters = blocks.values().stream().mapToInt(block -> block.text.length() + block.thinking.length()
+                + block.input.length() + block.signature.length()).sum();
+            if (characters > 16_000) {
+                throw new IOException("model output too large");
+            }
         });
-        if (!done[0] || stopReason[0] == null) throw new IOException("incomplete DeepSeek Anthropic stream");
+        if (!done[0] || stopReason[0] == null) {
+            throw new IOException("incomplete DeepSeek Anthropic stream");
+        }
         if (!"end_turn".equals(stopReason[0]) && !"tool_use".equals(stopReason[0])) {
             throw new IOException("DeepSeek Anthropic stopped unexpectedly: " + stopReason[0]);
         }
@@ -190,8 +216,12 @@ public final class AnthropicClient implements ChatModel {
         for (BlockBuilder builder : blocks.values()) {
             AssistantBlock block = builder.build();
             saved.add(block);
-            if ("text".equals(block.type()) && block.text() != null) text.append(block.text());
-            if ("thinking".equals(block.type()) && block.thinking() != null) reasoning.append(block.thinking());
+            if ("text".equals(block.type()) && block.text() != null) {
+                text.append(block.text());
+            }
+            if ("thinking".equals(block.type()) && block.thinking() != null) {
+                reasoning.append(block.thinking());
+            }
             if ("tool_use".equals(block.type())) {
                 if (block.id() == null || block.name() == null || block.input() == null) {
                     throw new IOException("incomplete Anthropic tool call");
@@ -203,7 +233,7 @@ public final class AnthropicClient implements ChatModel {
             throw new IOException("Anthropic stop reason does not match tool calls");
         }
         return new AssistantTurn(text.toString(), List.copyOf(calls), calls.isEmpty() ? "stop" : "tool_calls",
-                reasoning.isEmpty() ? null : reasoning.toString(), List.copyOf(saved), usage[0], metadata[0]);
+            reasoning.isEmpty() ? null : reasoning.toString(), List.copyOf(saved), usage[0], metadata[0]);
     }
 
     private final class BlockBuilder {
@@ -215,49 +245,94 @@ public final class AnthropicClient implements ChatModel {
 
         BlockBuilder(Block initial) {
             this.initial = initial;
-            if (initial.text() != null) text.append(initial.text());
-            if (initial.thinking() != null) thinking.append(initial.thinking());
-            if (initial.signature() != null) signature.append(initial.signature());
+            if (initial.text() != null) {
+                text.append(initial.text());
+            }
+            if (initial.thinking() != null) {
+                thinking.append(initial.thinking());
+            }
+            if (initial.signature() != null) {
+                signature.append(initial.signature());
+            }
         }
 
         void append(Delta delta, Consumer<String> onText) {
-            if (delta.text() != null) { text.append(delta.text()); onText.accept(delta.text()); }
-            if (delta.thinking() != null) thinking.append(delta.thinking());
-            if (delta.signature() != null) signature.append(delta.signature());
-            if (delta.partialJson() != null) input.append(delta.partialJson());
+            if (delta.text() != null) {
+                text.append(delta.text());
+                onText.accept(delta.text());
+            }
+            if (delta.thinking() != null) {
+                thinking.append(delta.thinking());
+            }
+            if (delta.signature() != null) {
+                signature.append(delta.signature());
+            }
+            if (delta.partialJson() != null) {
+                input.append(delta.partialJson());
+            }
         }
 
         AssistantBlock build() throws IOException {
             String toolInput = null;
             if ("tool_use".equals(initial.type())) {
                 JsonNode parsed = input.isEmpty() ? initial.input() : json.readTree(input.toString());
-                if (parsed == null || !parsed.isObject()) throw new IOException("invalid Anthropic tool input");
+                if (parsed == null || !parsed.isObject()) {
+                    throw new IOException("invalid Anthropic tool input");
+                }
                 toolInput = json.writeValueAsString(parsed);
             }
             return new AssistantBlock(initial.type(), "text".equals(initial.type()) ? text.toString() : null,
-                    "thinking".equals(initial.type()) ? thinking.toString() : null,
-                    signature.isEmpty() ? null : signature.toString(), initial.id(), initial.name(), toolInput);
+                "thinking".equals(initial.type()) ? thinking.toString() : null,
+                signature.isEmpty() ? null : signature.toString(), initial.id(), initial.name(), toolInput);
         }
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record Block(String type, String text, String thinking, String signature, String id, String name,
-                 JsonNode input, @JsonProperty("tool_use_id") String toolUseId, String content) {}
-    record Message(String role, List<Block> content) {}
-    record Function(String name, String description, @JsonProperty("input_schema") ToolSpec.ParameterSchema inputSchema) {}
-    record Thinking(String type) {}
-    record OutputConfig(String effort) {}
+    record Block(String type, String text, String thinking, String signature, String id, String name, JsonNode input,
+        @JsonProperty("tool_use_id") String toolUseId, String content) {
+    }
+
+    record Message(String role, List<Block> content) {
+    }
+
+    record Function(String name, String description,
+        @JsonProperty("input_schema") ToolSpec.ParameterSchema inputSchema) {
+    }
+
+    record Thinking(String type) {
+    }
+
+    record OutputConfig(String effort) {
+    }
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Request(String model, String system, List<Message> messages, boolean stream, Thinking thinking,
-                   @JsonProperty("output_config") OutputConfig outputConfig, List<Function> tools,
-                   @JsonProperty("max_tokens") int maxTokens) {}
-    record EventType(String type) {}
-    record BlockStart(int index, @JsonProperty("content_block") Block contentBlock) {}
-    record BlockDelta(int index, Delta delta) {}
+        @JsonProperty("output_config") OutputConfig outputConfig, List<Function> tools,
+        @JsonProperty("max_tokens") int maxTokens) {
+    }
+
+    record EventType(String type) {
+    }
+
+    record BlockStart(int index, @JsonProperty("content_block") Block contentBlock) {
+    }
+
+    record BlockDelta(int index, Delta delta) {
+    }
+
     record Delta(String type, String text, String thinking, String signature,
-                 @JsonProperty("partial_json") String partialJson) {}
-    record MessageStart(MessageInfo message) {}
-    record MessageInfo(ProviderUsage usage, String id, String model) {}
-    record MessageDelta(Stop delta, ProviderUsage usage) {}
-    record Stop(@JsonProperty("stop_reason") String stopReason) {}
+        @JsonProperty("partial_json") String partialJson) {
+    }
+
+    record MessageStart(MessageInfo message) {
+    }
+
+    record MessageInfo(ProviderUsage usage, String id, String model) {
+    }
+
+    record MessageDelta(Stop delta, ProviderUsage usage) {
+    }
+
+    record Stop(@JsonProperty("stop_reason") String stopReason) {
+    }
 }

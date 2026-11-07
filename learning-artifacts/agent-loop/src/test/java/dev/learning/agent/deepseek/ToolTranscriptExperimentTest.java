@@ -21,18 +21,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Offline experiments for docs/05-tool-calls-and-transcripts.md.
- * Exercises the project's actual request adapters without sending HTTP requests.
- * Writes inspectable request fixtures under target/tool-transcript-experiment/.
- * Missing results are diagnosed here; the adapters do not validate pairing.
+ * Offline experiments for docs/05-tool-calls-and-transcripts.md. Exercises the project's actual request adapters
+ * without sending HTTP requests. Writes inspectable request fixtures under target/tool-transcript-experiment/. Missing
+ * results are diagnosed here; the adapters do not validate pairing.
  */
 class ToolTranscriptExperimentTest {
     private final ObjectMapper json = new ObjectMapper();
-    private final List<ToolCall> calls = List.of(
-            call("call_a", "1+2"), call("call_b", "4*5"), call("call_c", "6-1"));
+    private final List<ToolCall> calls = List.of(call("call_a", "1+2"), call("call_b", "4*5"), call("call_c", "6-1"));
 
     @ParameterizedTest
     @ValueSource(strings = {"chat", "responses", "anthropic"})
@@ -73,8 +73,8 @@ class ToolTranscriptExperimentTest {
 
         assertEquals(List.of("call_a", "call_b"), executed);
         assertTrue(transcript.unansweredIds().isEmpty());
-        assertEquals(Map.of("call_a", "3", "call_b", "20",
-                "call_c", "error: not executed; max_tool_calls_per_turn=2"), transcript.results());
+        assertEquals(Map.of("call_a", "3", "call_b", "20", "call_c", "error: not executed; max_tool_calls_per_turn=2"),
+            transcript.results());
     }
 
     @ParameterizedTest
@@ -99,17 +99,17 @@ class ToolTranscriptExperimentTest {
         ModelSettings settings = ModelSettings.defaults();
         Object request = switch (protocol) {
             case "chat" -> ChatRequest.forAgent(settings, history, calculator().definitions());
-            case "responses" -> new ResponsesClient(json, "test", "https://api.example.test")
-                    .request(history, calculator().definitions(), settings);
-            case "anthropic" -> new AnthropicClient(json, "test", "https://api.example.test")
-                    .request(history, calculator().definitions(), settings);
+            case "responses" -> new ResponsesClient(json, "test", "https://api.example.test").request(history,
+                calculator().definitions(), settings);
+            case "anthropic" -> new AnthropicClient(json, "test", "https://api.example.test").request(history,
+                calculator().definitions(), settings);
             default -> throw new IllegalArgumentException("unknown protocol: " + protocol);
         };
         JsonNode body = json.valueToTree(request);
         Path directory = Path.of("target", "tool-transcript-experiment");
         Files.createDirectories(directory);
-        json.writerWithDefaultPrettyPrinter().writeValue(
-                directory.resolve(scenario + "-" + protocol + ".json").toFile(), body);
+        json.writerWithDefaultPrettyPrinter()
+            .writeValue(directory.resolve(scenario + "-" + protocol + ".json").toFile(), body);
 
         Transcript transcript = new Transcript(new ArrayList<>(), new ArrayList<>(), new LinkedHashMap<>());
         if ("chat".equals(protocol)) {
@@ -143,15 +143,15 @@ class ToolTranscriptExperimentTest {
                 }
             }
         }
-        System.out.printf("%s/%s: requested=%s, returned=%s, unanswered=%s%n",
-                scenario, protocol, transcript.requestedIds(), transcript.resultIds(), transcript.unansweredIds());
+        System.out.printf("%s/%s: requested=%s, returned=%s, unanswered=%s%n", scenario, protocol,
+            transcript.requestedIds(), transcript.resultIds(), transcript.unansweredIds());
         return transcript;
     }
 
     private List<ChatMessage> startHistory() {
         return new ArrayList<>(List.of(ChatMessage.system("Use calculator for arithmetic."),
-                ChatMessage.user("Calculate 1+2, 4*5, and 6-1."),
-                ChatMessage.assistant(new AssistantTurn("", calls, "tool_calls"))));
+            ChatMessage.user("Calculate 1+2, 4*5, and 6-1."),
+            ChatMessage.assistant(new AssistantTurn("", calls, "tool_calls"))));
     }
 
     private ToolRegistry calculator() {
@@ -161,8 +161,8 @@ class ToolTranscriptExperimentTest {
     }
 
     private static ToolCall call(String id, String expression) {
-        return new ToolCall(id, "function", new ToolCall.FunctionCall("calculator",
-                "{\"expression\":\"" + expression + "\"}"));
+        return new ToolCall(id, "function",
+            new ToolCall.FunctionCall("calculator", "{\"expression\":\"" + expression + "\"}"));
     }
 
     private record Transcript(List<String> requestedIds, List<String> resultIds, Map<String, String> results) {

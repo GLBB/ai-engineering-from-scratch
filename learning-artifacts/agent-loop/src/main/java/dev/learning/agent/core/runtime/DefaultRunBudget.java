@@ -19,32 +19,52 @@ public final class DefaultRunBudget implements RunBudget {
 
     public DefaultRunBudget(AgentMode mode) {
         this.mode = mode;
-        maxModels = switch (mode) { case REACT -> 8; case REWOO -> 3; case PLAN_EXECUTE -> 35; };
-        maxTools = switch (mode) { case REACT -> 16; case REWOO -> 8; case PLAN_EXECUTE -> 12; };
+        maxModels = switch (mode) {
+            case REACT -> 8;
+            case REWOO -> 3;
+            case PLAN_EXECUTE -> 35;
+        };
+        maxTools = switch (mode) {
+            case REACT -> 16;
+            case REWOO -> 8;
+            case PLAN_EXECUTE -> 12;
+        };
     }
 
     public synchronized void claimModel(ModelUse use) {
         int reserved = 0;
-        if (mode != AgentMode.REACT && use != ModelUse.FINALIZER && !finalized) reserved = 1;
-        if (mode == AgentMode.PLAN_EXECUTE && use == ModelUse.EXECUTOR) reserved++;
+        if (mode != AgentMode.REACT && use != ModelUse.FINALIZER && !finalized) {
+            reserved = 1;
+        }
+        if (mode == AgentMode.PLAN_EXECUTE && use == ModelUse.EXECUTOR) {
+            reserved++;
+        }
         if (models >= maxModels - reserved || (use == ModelUse.FINALIZER && finalized)) {
             throw new BudgetExceededException("model calls");
         }
         models++;
-        if (use == ModelUse.FINALIZER) finalized = true;
+        if (use == ModelUse.FINALIZER) {
+            finalized = true;
+        }
     }
 
     public synchronized void claimToolAttempt() {
-        if (tools >= maxTools) throw new BudgetExceededException("tool attempts");
+        if (tools >= maxTools) {
+            throw new BudgetExceededException("tool attempts");
+        }
         tools++;
     }
 
     public synchronized void recordToolResult(ToolResult result) {
-        if (result.executed()) executed++;
+        if (result.executed()) {
+            executed++;
+        }
     }
 
     public synchronized void claimStep() {
-        if (steps >= 8) throw new BudgetExceededException("step attempts");
+        if (steps >= 8) {
+            throw new BudgetExceededException("step attempts");
+        }
         steps++;
     }
 
@@ -56,7 +76,9 @@ public final class DefaultRunBudget implements RunBudget {
     }
 
     public synchronized boolean claimFormatRepair() {
-        if (mode == AgentMode.REACT || repaired) return false;
+        if (mode == AgentMode.REACT || repaired) {
+            return false;
+        }
         repaired = true;
         return true;
     }

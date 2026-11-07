@@ -19,7 +19,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReActRunnerTest {
     @Test
@@ -54,7 +57,9 @@ class ReActRunnerTest {
             requests.add(messages);
             return new AssistantTurn("answer", List.of(), "stop");
         };
-        TestAgent loop = new TestAgent(model, new ToolRegistry(), 1, ignored -> {}, ignored -> {});
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 1, ignored -> {
+        }, ignored -> {
+        });
 
         loop.run("first", ModelSettings.defaults());
         loop.run("second", ModelSettings.defaults());
@@ -82,23 +87,23 @@ class ReActRunnerTest {
                 default -> new AssistantTurn("done", List.of(), "stop");
             };
         };
-        TestAgent loop = new TestAgent(model, tools, 3, ignored -> {}, toolNotifications::add, trace::add);
+        TestAgent loop = new TestAgent(model, tools, 3, ignored -> {
+        }, toolNotifications::add, trace::add);
 
         loop.run("calculate", ModelSettings.defaults());
 
         assertEquals(List.of("system", "user", "assistant", "tool", "tool"), roles(requests.get(1)));
-        List<ChatMessage> results = requests.get(2).stream()
-                .filter(message -> "tool".equals(message.role())).toList();
+        List<ChatMessage> results = requests.get(2).stream().filter(message -> "tool".equals(message.role())).toList();
         assertEquals(List.of("a", "b", "c"), results.stream().map(ChatMessage::toolCallId).toList());
         assertEquals(List.of("3", "20", "5"), results.stream().map(message -> content(message.content())).toList());
         assertEquals(List.of("tool: calculator", "tool: calculator", "tool: calculator"), toolNotifications);
-        List<TraceEvent> started = trace.stream()
-                .filter(event -> "tool".equals(event.kind()) && "running".equals(event.status())).toList();
-        List<TraceEvent> finished = trace.stream()
-                .filter(event -> "tool".equals(event.kind()) && "complete".equals(event.status())).toList();
+        List<TraceEvent> started =
+            trace.stream().filter(event -> "tool".equals(event.kind()) && "running".equals(event.status())).toList();
+        List<TraceEvent> finished =
+            trace.stream().filter(event -> "tool".equals(event.kind()) && "complete".equals(event.status())).toList();
         String requestId = trace.get(0).id().substring("user-".length());
-        assertEquals(List.of("tool-" + requestId + "-1", "tool-" + requestId + "-2",
-                "tool-" + requestId + "-3"), started.stream().map(TraceEvent::id).toList());
+        assertEquals(List.of("tool-" + requestId + "-1", "tool-" + requestId + "-2", "tool-" + requestId + "-3"),
+            started.stream().map(TraceEvent::id).toList());
         assertEquals(started.stream().map(TraceEvent::id).toList(), finished.stream().map(TraceEvent::id).toList());
         assertEquals(List.of(1, 1, 2), started.stream().map(TraceEvent::round).toList());
     }
@@ -117,11 +122,12 @@ class ReActRunnerTest {
             }
             return new AssistantTurn("done", List.of(), "stop");
         };
-        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, toolNotifications::add);
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {
+        }, toolNotifications::add);
 
         IOException error = assertThrows(IOException.class, () -> loop.run("first", ModelSettings.defaults()));
         assertEquals(withTools ? "DeepSeek returned tools with unexpected finish reason: length"
-                : "DeepSeek stopped unexpectedly: length", error.getMessage());
+            : "DeepSeek stopped unexpectedly: length", error.getMessage());
         loop.run("retry", ModelSettings.defaults());
 
         assertTrue(toolNotifications.isEmpty());
@@ -137,10 +143,12 @@ class ReActRunnerTest {
             var messages = request.messages();
             var settings = request.settings();
             requests.add(messages);
-            return new AssistantTurn("", List.of(new ToolCall("missing", "function",
-                    new ToolCall.FunctionCall("unknown", "{}"))), "tool_calls");
+            return new AssistantTurn("",
+                List.of(new ToolCall("missing", "function", new ToolCall.FunctionCall("unknown", "{}"))), "tool_calls");
         };
-        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {});
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {
+        }, ignored -> {
+        });
 
         IOException error = assertThrows(IOException.class, () -> loop.run("first", ModelSettings.defaults()));
         assertEquals("agent stopped after 2 model turns", error.getMessage());
@@ -149,7 +157,7 @@ class ReActRunnerTest {
 
         List<ChatMessage> nextRequest = requests.get(2);
         assertEquals(List.of("system", "user", "assistant", "tool", "assistant", "tool", "user", "user"),
-                roles(nextRequest));
+            roles(nextRequest));
         assertEquals("unknown tool unknown", content(nextRequest.get(5).content()));
         assertEquals("BUDGET_EXHAUSTED", StrictJson.object(nextRequest.get(6).content()).path("status").asText());
     }
@@ -160,12 +168,17 @@ class ReActRunnerTest {
         List<TraceEvent> trace = new ArrayList<>();
         ChatModel model = (request, onText, control) -> {
             var messages = request.messages();
-            var settings = request.settings(); throw failure; };
-        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {}, trace::add);
+            var settings = request.settings();
+            throw failure;
+        };
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {
+        }, ignored -> {
+        }, trace::add);
 
-        assertSame(failure, assertThrows(InterruptedException.class, () -> loop.run("hello", ModelSettings.defaults())));
+        assertSame(failure,
+            assertThrows(InterruptedException.class, () -> loop.run("hello", ModelSettings.defaults())));
         assertEquals(List.of("complete", "complete", "running", "error"),
-                trace.stream().map(TraceEvent::status).toList());
+            trace.stream().map(TraceEvent::status).toList());
         assertEquals("cancelled", trace.get(3).output());
         assertEquals(trace.get(2).id(), trace.get(3).id());
     }
@@ -176,10 +189,15 @@ class ReActRunnerTest {
         List<TraceEvent> trace = new ArrayList<>();
         ChatModel model = (request, onText, control) -> {
             var messages = request.messages();
-            var settings = request.settings(); throw failure; };
-        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {}, ignored -> {}, trace::add);
+            var settings = request.settings();
+            throw failure;
+        };
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 2, ignored -> {
+        }, ignored -> {
+        }, trace::add);
 
-        assertSame(failure, assertThrows(IllegalStateException.class, () -> loop.run("hello", ModelSettings.defaults())));
+        assertSame(failure,
+            assertThrows(IllegalStateException.class, () -> loop.run("hello", ModelSettings.defaults())));
         assertEquals("error", trace.get(3).status());
         assertEquals("IllegalStateException", trace.get(3).output());
     }
@@ -194,7 +212,9 @@ class ReActRunnerTest {
             requests.add(messages);
             return new AssistantTurn("done", List.of(), "stop");
         };
-        TestAgent loop = new TestAgent(model, new ToolRegistry(), 1, ignored -> {}, ignored -> {}, trace::add);
+        TestAgent loop = new TestAgent(model, new ToolRegistry(), 1, ignored -> {
+        }, ignored -> {
+        }, trace::add);
 
         assertThrows(IllegalArgumentException.class, () -> loop.run(null, ModelSettings.defaults()));
         assertThrows(IllegalArgumentException.class, () -> loop.run(" ", ModelSettings.defaults()));
@@ -206,13 +226,16 @@ class ReActRunnerTest {
     }
 
     private static String content(String json) {
-        try { return new ObjectMapper().readTree(json).path("content").asText(); }
-        catch (Exception e) { throw new AssertionError(e); }
+        try {
+            return new ObjectMapper().readTree(json).path("content").asText();
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 
     private static ToolCall call(String id, String expression) {
-        return new ToolCall(id, "function", new ToolCall.FunctionCall("calculator",
-                "{\"expression\":\"" + expression + "\"}"));
+        return new ToolCall(id, "function",
+            new ToolCall.FunctionCall("calculator", "{\"expression\":\"" + expression + "\"}"));
     }
 
     private static List<String> roles(List<ChatMessage> messages) {

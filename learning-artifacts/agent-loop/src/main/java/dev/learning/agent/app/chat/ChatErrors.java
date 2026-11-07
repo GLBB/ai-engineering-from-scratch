@@ -11,9 +11,12 @@ final class ChatErrors {
     ResponseEntity<ApiError> api(ApiFailure error) {
         return ResponseEntity.status(error.status()).body(new ApiError(error.code(), error.getMessage()));
     }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> invalid(HttpMessageNotReadableException error) {
         return ResponseEntity.badRequest().body(new ApiError("INVALID_REQUEST", "Invalid JSON or execution mode."));
     }
-    record ApiError(String code, String message) {}
+
+    record ApiError(String code, String message) {
+    }
 }

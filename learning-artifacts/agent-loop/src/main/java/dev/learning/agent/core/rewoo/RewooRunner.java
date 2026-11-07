@@ -30,7 +30,11 @@ import java.util.stream.Collectors;
 public final class RewooRunner implements AgentRunner {
     private final ToolRegistry tools;
     private final ConversationMemory memory;
-    public RewooRunner(ToolRegistry tools) { this(tools, List.of()); }
+
+    public RewooRunner(ToolRegistry tools) {
+        this(tools, List.of());
+    }
+
     public RewooRunner(ToolRegistry tools, List<TaskInput.ConversationTurn> history) {
         this.tools = tools;
         memory = new ConversationMemory(history);
@@ -44,8 +48,8 @@ public final class RewooRunner implements AgentRunner {
         RunScope planScope = new RunScope("PLAN", null, 0);
         var validated = context.telemetry().observe(planScope, () -> {
             var value = ModelJson.request(Prompts.read("rewoo-planner"), new PlannerInput(task, tools.definitions()),
-                    request.settings(), planScope, context,
-                    text -> RewooValidator.validate(RewooPlanParser.parse(text, tools), names));
+                request.settings(), planScope, context,
+                text -> RewooValidator.validate(RewooPlanParser.parse(text, tools), names));
             context.emit("plan", new ModelJson.PlanDisplay(AgentMode.REWOO, 0, value.plan()));
             return value;
         });
@@ -55,7 +59,8 @@ public final class RewooRunner implements AgentRunner {
             try (TraceSpan work = context.telemetry().phase(scope)) {
                 ModelJson.phase(context, "WORK", "running", step.id(), 0);
                 if (context.needsInput()) {
-                    DefaultToolExecutionService.skipped(step.tool(), StrictJson.write(step.arguments()), step.id(), scope, context, "awaiting user input");
+                    DefaultToolExecutionService.skipped(step.tool(), StrictJson.write(step.arguments()), step.id(),
+                        scope, context, "awaiting user input");
                     continue;
                 }
                 try {
@@ -63,12 +68,14 @@ public final class RewooRunner implements AgentRunner {
                     context.tools().invoke(bound, step.id(), names, scope, context);
                 } catch (IOException e) {
                     boolean dependencyFailed = validated.dependencies().get(step.id()).stream()
-                            .anyMatch(id -> !AnswerChecks.usable(context.evidence(), id));
-                    if (dependencyFailed) DefaultToolExecutionService.skipped(step.tool(), StrictJson.write(step.arguments()),
-                            step.id(), scope, context, e.getMessage());
-                    else {
+                        .anyMatch(id -> !AnswerChecks.usable(context.evidence(), id));
+                    if (dependencyFailed) {
+                        DefaultToolExecutionService.skipped(step.tool(), StrictJson.write(step.arguments()), step.id(),
+                            scope, context, e.getMessage());
+                    } else {
                         work.error("BINDING_FAILED");
-                        DefaultToolExecutionService.rejected(step.tool(), StrictJson.write(step.arguments()), step.id(), scope, context, e.getMessage());
+                        DefaultToolExecutionService.rejected(step.tool(), StrictJson.write(step.arguments()), step.id(),
+                            scope, context, e.getMessage());
                     }
                 }
             }
@@ -77,18 +84,24 @@ public final class RewooRunner implements AgentRunner {
         RunScope solveScope = new RunScope("SOLVE", null, 0);
         var answer = context.telemetry().observe(solveScope, () -> {
             var value = ModelJson.call(Prompts.read("rewoo-solver"),
-                    StrictJson.write(new SolverInput(task, validated.plan(), context.evidence().snapshot())),
-                    request.settings(), solveScope, context, true);
+                StrictJson.write(new SolverInput(task, validated.plan(), context.evidence().snapshot())),
+                request.settings(), solveScope, context, true);
             AnswerChecks.citations(value.content(), validated.plan().answerEvidence(), context.evidence());
             return value;
         });
         ExecutionStatus status = AnswerChecks.status(validated.plan().answerEvidence(), context.evidence());
-        if (status == ExecutionStatus.COMPLETE || status == ExecutionStatus.PARTIAL || status == ExecutionStatus.NEEDS_INPUT)
+        if (status == ExecutionStatus.COMPLETE || status == ExecutionStatus.PARTIAL
+            || status == ExecutionStatus.NEEDS_INPUT) {
             memory.commit(new TaskInput.ConversationTurn(request.prompt(), answer.content(), status, List.of()));
-        return new RunResult(status, CompletionCheck.UNVERIFIED, answer.content(),
-                status == ExecutionStatus.NEEDS_INPUT ? "NEEDS_INPUT" : status == ExecutionStatus.FAILED ? "MISSING_EVIDENCE" : null, context.budget().snapshot());
+        }
+        return new RunResult(status, CompletionCheck.UNVERIFIED, answer.content(), status == ExecutionStatus.NEEDS_INPUT
+            ? "NEEDS_INPUT" : status == ExecutionStatus.FAILED ? "MISSING_EVIDENCE" : null,
+            context.budget().snapshot());
     }
 
-    record PlannerInput(TaskInput task, List<ToolSpec> tools) {}
-    record SolverInput(TaskInput task, RewooPlan plan, List<Evidence> evidence) {}
+    record PlannerInput(TaskInput task, List<ToolSpec> tools) {
+    }
+
+    record SolverInput(TaskInput task, RewooPlan plan, List<Evidence> evidence) {
+    }
 }

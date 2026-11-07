@@ -4,6 +4,7 @@ import java.util.List;
 
 /** Model and reasoning level selected for one user request. */
 public record ModelSettings(String model, String reasoningLevel) {
+
     public static final String DEFAULT_MODEL = "deepseek-flash";
     public static final List<String> MODELS = List.of("deepseek-flash", "deepseek-v4-pro");
     public static final List<String> LEVELS = List.of("off", "low", "high", "max");

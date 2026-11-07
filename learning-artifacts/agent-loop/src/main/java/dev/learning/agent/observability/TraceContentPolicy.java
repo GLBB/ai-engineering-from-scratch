@@ -17,7 +17,7 @@ public final class TraceContentPolicy {
         while (at < text.length()) {
             int point = text.codePointAt(at);
             int width = point < 32 ? 6 : point == '"' || point == '\\' ? 2
-                    : new String(Character.toChars(point)).getBytes(StandardCharsets.UTF_8).length;
+                : new String(Character.toChars(point)).getBytes(StandardCharsets.UTF_8).length;
             if (bytes + width > 4064) {
                 break;
             }
@@ -57,5 +57,7 @@ public final class TraceContentPolicy {
         return preview(value, false);
     }
 
-    public record ToolInput(String tool, String expression, String city, String countryCode, String admin1, Integer days) {}
+    public record ToolInput(String tool, String expression, String city, String countryCode, String admin1,
+        Integer days) {
+    }
 }

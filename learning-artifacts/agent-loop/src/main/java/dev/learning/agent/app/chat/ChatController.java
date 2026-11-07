@@ -46,9 +46,13 @@ final class ChatController {
 
     @GetMapping("/api/session/status")
     ResponseEntity<?> status(HttpServletRequest request) {
-        if (!LocalRequest.isLocalHost(request)) throw new ApiFailure(403, "FORBIDDEN_ORIGIN", "Only local requests are allowed.");
+        if (!LocalRequest.isLocalHost(request)) {
+            throw new ApiFailure(403, "FORBIDDEN_ORIGIN", "Only local requests are allowed.");
+        }
         AgentSessions.Session session = existing(request);
-        if (session == null) throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
+        if (session == null) {
+            throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
+        }
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(session.status());
     }
 
@@ -61,8 +65,7 @@ final class ChatController {
         if (session == null) {
             throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
         }
-        boolean invalidPrompt = body.prompt() == null || body.prompt().isBlank()
-                || body.prompt().length() > 10_000;
+        boolean invalidPrompt = body.prompt() == null || body.prompt().isBlank() || body.prompt().length() > 10_000;
         if (invalidPrompt) {
             throw new ApiFailure(400, "INVALID_REQUEST", "Invalid prompt, model or reasoning level.");
         }
@@ -75,13 +78,14 @@ final class ChatController {
             throw new ApiFailure(400, "INVALID_REQUEST", "Invalid prompt, model or reasoning level.");
         }
         RunLease lease = session.accept(body.prompt(), settings, body.mode());
-        WebAsyncUtils.getAsyncManager(request).registerCallableInterceptor(lease.requestId(), new AgentRunInterceptor(lease));
+        WebAsyncUtils.getAsyncManager(request).registerCallableInterceptor(lease.requestId(),
+            new AgentRunInterceptor(lease));
 
         StreamingResponseBody stream = output -> {
             EventSink sink = (type, data) -> {
                 try {
                     byte[] line = (json.writeValueAsString(new ChatEvent(lease.requestId(), type, data)) + "\n")
-                            .getBytes(StandardCharsets.UTF_8);
+                        .getBytes(StandardCharsets.UTF_8);
                     output.write(line);
                     output.flush();
                 } catch (IOException e) {
@@ -90,16 +94,26 @@ final class ChatController {
             };
             try {
                 RunResult result = session.execute(lease, sink);
-                if (result == null) return;
+                if (result == null) {
+                    return;
+                }
                 sink.emit("run_result", result);
-                if (result.status() == ExecutionStatus.COMPLETE || result.status() == ExecutionStatus.PARTIAL || result.status() == ExecutionStatus.NEEDS_INPUT) sink.emit("done", "");
-                else sink.emit("error", new ChatErrors.ApiError(result.errorCode() == null ? "INCOMPLETE_RUN" : result.errorCode(), "Run did not complete."));
+                if (result.status() == ExecutionStatus.COMPLETE || result.status() == ExecutionStatus.PARTIAL
+                    || result.status() == ExecutionStatus.NEEDS_INPUT) {
+                    sink.emit("done", "");
+                } else {
+                    sink.emit("error", new ChatErrors.ApiError(
+                        result.errorCode() == null ? "INCOMPLETE_RUN" : result.errorCode(), "Run did not complete."));
+                }
             } catch (Exception e) {
                 lease.cancel("stream or execution failed");
                 String message = e.getMessage() == null ? "Agent failed." : e.getMessage();
                 try {
-                    ExecutionStatus status = (e instanceof InterruptedException || lease.context().control().cancelled()) ? ExecutionStatus.CANCELLED : ExecutionStatus.FAILED;
-                    sink.emit("run_result", new RunResult(status, CompletionCheck.UNVERIFIED, "", "EXECUTION_ERROR", lease.context().budget().snapshot()));
+                    ExecutionStatus status =
+                        (e instanceof InterruptedException || lease.context().control().cancelled())
+                            ? ExecutionStatus.CANCELLED : ExecutionStatus.FAILED;
+                    sink.emit("run_result", new RunResult(status, CompletionCheck.UNVERIFIED, "", "EXECUTION_ERROR",
+                        lease.context().budget().snapshot()));
                     sink.emit("error", new ChatErrors.ApiError("EXECUTION_ERROR", message));
                 } catch (UncheckedIOException ignored) {
                     // The browser has already disconnected.
@@ -107,8 +121,7 @@ final class ChatController {
             }
         };
         return ResponseEntity.ok().header("Cache-Control", "no-store")
-                .contentType(MediaType.parseMediaType("application/x-ndjson"))
-                .body(stream);
+            .contentType(MediaType.parseMediaType("application/x-ndjson")).body(stream);
     }
 
     @PostMapping(path = "/api/approve", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -121,7 +134,8 @@ final class ChatController {
             throw new ApiFailure(401, "SESSION_NOT_FOUND", "Create a new conversation.");
         }
         if (body.id() == null || !session.decide(body.id(), body.approved())) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ChatErrors.ApiError("APPROVAL_EXPIRED", "Approval expired."));
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ChatErrors.ApiError("APPROVAL_EXPIRED", "Approval expired."));
         }
         return ResponseEntity.ok().build();
     }
@@ -130,8 +144,13 @@ final class ChatController {
         return sessions.get(request.getHeader(SESSION_HEADER));
     }
 
-    record Prompt(String prompt, String model, String reasoningLevel, AgentMode mode) {}
-    record Decision(String id, boolean approved) {}
-    record ChatEvent(java.util.UUID requestId, String type, Object data) {}
+    record Prompt(String prompt, String model, String reasoningLevel, AgentMode mode) {
+    }
+
+    record Decision(String id, boolean approved) {
+    }
+
+    record ChatEvent(java.util.UUID requestId, String type, Object data) {
+    }
 
 }

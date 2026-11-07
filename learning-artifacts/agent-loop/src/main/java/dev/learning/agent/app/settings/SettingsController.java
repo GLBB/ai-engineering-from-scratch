@@ -16,18 +16,26 @@ import java.io.IOException;
 final class SettingsController {
     private final SettingsStore settings;
 
-    SettingsController(SettingsStore settings) { this.settings = settings; }
+    SettingsController(SettingsStore settings) {
+        this.settings = settings;
+    }
 
     @GetMapping("/api/settings")
     ResponseEntity<?> get(HttpServletRequest request) throws IOException {
-        if (!LocalRequest.isLocalHost(request)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        if (!LocalRequest.isLocalHost(request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(settings.status());
     }
 
     @PostMapping("/api/settings")
     ResponseEntity<?> save(@RequestBody SettingsStore.Settings body, HttpServletRequest request) throws IOException {
-        if (!LocalRequest.hasSameOrigin(request)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        if (body.protocol() == null) return ResponseEntity.badRequest().build();
+        if (!LocalRequest.hasSameOrigin(request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (body.protocol() == null) {
+            return ResponseEntity.badRequest().build();
+        }
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(settings.save(body.protocol()));
     }
 }

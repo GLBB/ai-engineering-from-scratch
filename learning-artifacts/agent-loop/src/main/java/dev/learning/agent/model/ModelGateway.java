@@ -7,8 +7,10 @@ import java.io.IOException;
 import java.util.function.Consumer;
 
 public interface ModelGateway {
-    default String protocol() { return "model"; }
-    AssistantTurn call(ModelRequest request, RunScope scope,
-                       Consumer<String> onText, RunContext context)
-            throws IOException, InterruptedException;
+    default String protocol() {
+        return "model";
+    }
+
+    AssistantTurn call(ModelRequest request, RunScope scope, Consumer<String> onText, RunContext context)
+        throws IOException, InterruptedException;
 }

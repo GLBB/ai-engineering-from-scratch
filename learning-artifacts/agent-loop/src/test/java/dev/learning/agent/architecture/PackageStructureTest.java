@@ -39,7 +39,9 @@ class PackageStructureTest {
         for (Path root : List.of(MAIN, Path.of("src/test/java/dev/learning/agent"))) {
             for (Path source : javaFiles(root)) {
                 String expected = PREFIX + root.relativize(source.getParent()).toString().replace('/', '.');
-                if (expected.endsWith(".")) expected = expected.substring(0, expected.length() - 1);
+                if (expected.endsWith(".")) {
+                    expected = expected.substring(0, expected.length() - 1);
+                }
                 assertTrue(Files.readString(source).startsWith("package " + expected + ";"), source.toString());
             }
         }
@@ -49,8 +51,8 @@ class PackageStructureTest {
         for (Path source : javaFiles(MAIN.resolve(directory))) {
             String content = Files.readString(source);
             for (String forbidden : forbiddenPackages) {
-                Pattern imported = Pattern.compile("(?m)^import (?:static )?"
-                        + Pattern.quote(PREFIX + forbidden) + "\\.");
+                Pattern imported =
+                    Pattern.compile("(?m)^import (?:static )?" + Pattern.quote(PREFIX + forbidden) + "\\.");
                 assertFalse(imported.matcher(content).find(), source + " depends on " + forbidden);
             }
         }

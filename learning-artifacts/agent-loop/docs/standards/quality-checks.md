@@ -63,11 +63,11 @@ mvn -Pquality verify
 `--all` 审计所有生产与测试 Java 文件。`quality` profile 在 `verify` 阶段绑定
 Spotless 与 Checkstyle，并执行正常 Maven 构建和测试；任一检查失败，构建失败。
 普通 `mvn test` 仍不执行格式检查，便于开发中快速验证行为。
-现有历史代码尚未完成迁移，因此全量检查预计失败，不能声称全项目已经达标。
+现有 Java 源码和测试已完成本地规则迁移，交付前应确保全量检查通过；自动检查不代表完整覆盖阿里手册。
 
 当前已提供 CI 可调用的入口，尚未修改仓库 CI 工作流，也未安装 Git hook。
-历史迁移期间，CI 应检出完整 Git 历史，按 PR 基线运行增量 `check --base` 和 `mvn test`；
-历史清理完成后改为 `mvn -Pquality verify` 全量阻塞。CI 只运行检查，不运行 `apply`。
+CI 应检出完整 Git 历史，运行 `mvn -Pquality verify` 全量阻塞；
+本地仍可使用增量 `check --base` 检查分支改动。CI 只运行检查，不运行 `apply`。
 本地 hook 可以提示，但可被跳过，不能替代 CI 和受保护分支的必需检查。
 
 ## 什么时候检查
@@ -105,10 +105,15 @@ python3 -B -m unittest discover -s scripts -p 'test_java_quality.py' -v
 修复后与 Checkstyle 的一致性。Java 17 样例包含 record、匿名类和文本块，格式化前后
 编译执行并比较输出。测试临时项目只放入 `tmp/`，结束后自动清理。
 
-2026-11-07 验证：8 个配置与范围测试通过，quality profile 中的 161 个业务测试通过；
+2026-11-07 首次审计：8 个配置与范围测试通过，quality profile 中的 161 个业务测试通过；
 全量 Spotless 检查在 152 个 Java 文件中发现 144 个需要格式化，Checkstyle 扩展规则在
 120 个文件中报告 1918 处违规。quality 构建在格式检查阶段以失败退出，未改写业务源码。
-这些是本次工作区的审计结果，不是豁免配额或将来的通过标准。
+随后完成全量迁移：移除通配符及无用导入、补齐分支和循环大括号、拆分变量声明、整理长字符串与排版。
+长 SSE 文本块使用续行保持报文原值，另对 151 个已有 Java 文件比较格式整理前后的字符串常量值，结果一致。
+强制类型转换后补一个空格，使 formatter 与现有 Checkstyle 空白规则一致。
+迁移后验证：`check --all`、`check --base origin/main` 和 `mvn -Pquality verify` 均通过，
+168 项 Java 测试、10 项前端测试、8 项配置与范围测试通过；课程与认证审计均为零问题。
+上述测试未调用真实外部模型接口。首次审计结果不是豁免配额或将来的通过标准。
 
 依据：[Spotless Maven 文档](https://github.com/diffplug/spotless/blob/main/plugin-maven/README.md)、
 [Checkstyle 行宽规则](https://checkstyle.sourceforge.io/checks/sizes/linelength.html)、

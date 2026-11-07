@@ -9,7 +9,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolBehaviorTest {
     private final ObjectMapper json = new ObjectMapper();
@@ -26,8 +28,7 @@ class ToolBehaviorTest {
     @Test
     void bashOutputRequiresSeparateSharingApproval(@TempDir Path directory) throws Exception {
         BashTool bash = new BashTool(json, directory, ignored -> true, ignored -> false);
-        assertEquals("error: user declined sharing Bash output",
-                bash.execute("{\"command\":\"printf 42\"}"));
+        assertEquals("error: user declined sharing Bash output", bash.execute("{\"command\":\"printf 42\"}"));
     }
 
     @Test
@@ -39,17 +40,17 @@ class ToolBehaviorTest {
     @Test
     void searchReportsMissingKeyWithoutNetwork() throws Exception {
         SearchTool search = new SearchTool(json, null);
-        assertEquals("error: search unavailable; set EXA_AI_KEY",
-                search.execute("{\"query\":\"agent loop\"}"));
+        assertEquals("error: search unavailable; set EXA_AI_KEY", search.execute("{\"query\":\"agent loop\"}"));
     }
 
     @Test
     void typedToolArgumentsAreValidated() {
         ToolRegistry tools = new ToolRegistry();
         tools.register(new CalculatorTool(json));
-        assertEquals("46", tools.dispatch(new ToolCall("call-1", "function",
-                new FunctionCall("calculator", "{\"expression\":\"(120+18)/3\"}"))));
-        assertTrue(tools.dispatch(new ToolCall("call-2", "function",
-                new FunctionCall("calculator", "{\"expression\":\"1/0\"}"))).startsWith("error:"));
+        assertEquals("46", tools.dispatch(
+            new ToolCall("call-1", "function", new FunctionCall("calculator", "{\"expression\":\"(120+18)/3\"}"))));
+        assertTrue(tools
+            .dispatch(new ToolCall("call-2", "function", new FunctionCall("calculator", "{\"expression\":\"1/0\"}")))
+            .startsWith("error:"));
     }
 }

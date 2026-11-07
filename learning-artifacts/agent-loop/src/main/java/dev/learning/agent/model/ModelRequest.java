@@ -2,9 +2,8 @@ package dev.learning.agent.model;
 
 import java.util.List;
 
-public record ModelRequest(List<ChatMessage> messages, ModelSettings settings,
-                           List<ToolSpec> tools, OutputMode outputMode,
-                           int maxOutputTokens, ModelUse use) {
+public record ModelRequest(List<ChatMessage> messages, ModelSettings settings, List<ToolSpec> tools,
+    OutputMode outputMode, int maxOutputTokens, ModelUse use) {
     public ModelRequest {
         messages = List.copyOf(messages);
         tools = List.copyOf(tools);

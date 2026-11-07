@@ -8,7 +8,8 @@
 - License: Apache 2.0; upstream license text is included in `LICENSE`.
 - Retrieved: 2026-11-07.
 
-Project modifications are marked at the end of the XML profile: modern Eclipse
+Project modifications include a space after type casts to agree with the local
+Checkstyle whitespace rule, plus settings marked at the end of the XML profile: modern Eclipse
 JDT settings expand method bodies and code blocks instead of retaining compact
 nonempty bodies. The upstream four-space indentation, 120-column wrapping,
 continuation indentation, braces, and method separators remain in effect.

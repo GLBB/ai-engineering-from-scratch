@@ -13,22 +13,44 @@ import java.util.Locale;
 /** Conservative matching: population and provider ordering never resolve ambiguity. */
 public final class CityResolver {
     public sealed interface Resolution permits Resolved, NotFound, Ambiguous {}
-    public record Resolved(GeoLocation location, String searchedCity) implements Resolution {}
-    public record NotFound(String city) implements Resolution {}
-    public record Ambiguous(List<GeoLocation> candidates) implements Resolution {
-        public Ambiguous { candidates = List.copyOf(candidates); }
+
+    public record Resolved(GeoLocation location, String searchedCity) implements Resolution {
     }
-    private final WeatherProvider provider;
-    private final ExternalObserver observer;
-    public CityResolver(WeatherProvider provider) { this(provider, ExternalObserver.NOOP); }
-    public CityResolver(WeatherProvider provider, ExternalObserver observer) { this.provider = provider; this.observer = observer; }
-    public Resolution resolve(LocationQuery query, WeatherCall call) throws IOException, InterruptedException {
-        try (TraceSpan span = observer.operation("agent_loop.weather.resolve")) {
-            try { return resolve(query, call, span); }
-            catch (IOException | InterruptedException | RuntimeException error) { span.fail(error); throw error; }
+
+    public record NotFound(String city) implements Resolution {
+    }
+
+    public record Ambiguous(List<GeoLocation> candidates) implements Resolution {
+        public Ambiguous {
+            candidates = List.copyOf(candidates);
         }
     }
-    private Resolution resolve(LocationQuery query, WeatherCall call, TraceSpan span) throws IOException, InterruptedException {
+
+    private final WeatherProvider provider;
+    private final ExternalObserver observer;
+
+    public CityResolver(WeatherProvider provider) {
+        this(provider, ExternalObserver.NOOP);
+    }
+
+    public CityResolver(WeatherProvider provider, ExternalObserver observer) {
+        this.provider = provider;
+        this.observer = observer;
+    }
+
+    public Resolution resolve(LocationQuery query, WeatherCall call) throws IOException, InterruptedException {
+        try (TraceSpan span = observer.operation("agent_loop.weather.resolve")) {
+            try {
+                return resolve(query, call, span);
+            } catch (IOException | InterruptedException | RuntimeException error) {
+                span.fail(error);
+                throw error;
+            }
+        }
+    }
+
+    private Resolution resolve(LocationQuery query, WeatherCall call, TraceSpan span)
+        throws IOException, InterruptedException {
         String city = query.city();
         List<GeoLocation> found = provider.search(query, city, call);
         if (found.isEmpty() && "CN".equals(query.countryCode()) && city.endsWith("市") && city.length() > 1) {
@@ -38,8 +60,12 @@ public final class CityResolver {
         }
         var unique = new LinkedHashMap<Long, GeoLocation>();
         for (GeoLocation place : found) {
-            if (query.countryCode() != null && !query.countryCode().equals(place.countryCode())) continue;
-            if (query.admin1() != null && !same(query.admin1(), place.admin1())) continue;
+            if (query.countryCode() != null && !query.countryCode().equals(place.countryCode())) {
+                continue;
+            }
+            if (query.admin1() != null && !same(query.admin1(), place.admin1())) {
+                continue;
+            }
             unique.putIfAbsent(place.id(), place);
         }
         span.attribute("agent_loop.weather.candidate_count", unique.size());
@@ -54,9 +80,11 @@ public final class CityResolver {
         span.attribute("agent_loop.weather.resolution", "AMBIGUOUS");
         return new Ambiguous(unique.values().stream().limit(5).toList());
     }
+
     private static boolean same(String first, String second) {
         return second != null && normalized(first).equals(normalized(second));
     }
+
     private static String normalized(String value) {
         return Normalizer.normalize(value.strip(), Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
     }

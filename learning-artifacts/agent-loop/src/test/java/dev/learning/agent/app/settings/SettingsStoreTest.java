@@ -13,10 +13,14 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SettingsStoreTest {
-    @TempDir Path directory;
+    @TempDir
+    Path directory;
 
     @Test
     void savedProtocolTakesEffectOnlyAfterRestart() throws Exception {
@@ -45,9 +49,8 @@ class SettingsStoreTest {
     void foreignOriginCannotChangeSavedProtocol() throws Exception {
         SettingsStore store = new SettingsStore(new ObjectMapper(), directory.resolve("settings.json"));
         MockMvc mvc = MockMvcBuilders.standaloneSetup(new SettingsController(store)).build();
-        mvc.perform(post("/api/settings").header("Origin", "http://other.example")
-                        .contentType("application/json").content("{\"protocol\":\"RESPONSES\"}"))
-                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/settings").header("Origin", "http://other.example").contentType("application/json")
+            .content("{\"protocol\":\"RESPONSES\"}")).andExpect(status().isForbidden());
         assertEquals(ApiProtocol.CHAT_COMPLETIONS, store.status().savedProtocol());
     }
 }

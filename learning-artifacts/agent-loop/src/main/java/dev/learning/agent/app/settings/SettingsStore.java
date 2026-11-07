@@ -28,7 +28,9 @@ public final class SettingsStore {
         this.activeProtocol = read();
     }
 
-    public ApiProtocol activeProtocol() { return activeProtocol; }
+    public ApiProtocol activeProtocol() {
+        return activeProtocol;
+    }
 
     synchronized SettingsStatus status() throws IOException {
         ApiProtocol saved = read();
@@ -36,7 +38,9 @@ public final class SettingsStore {
     }
 
     synchronized SettingsStatus save(ApiProtocol protocol) throws IOException {
-        if (protocol == null) throw new IllegalArgumentException("protocol is required");
+        if (protocol == null) {
+            throw new IllegalArgumentException("protocol is required");
+        }
         Files.createDirectories(file.getParent());
         Path temporary = Files.createTempFile(file.getParent(), "settings-", ".tmp");
         try {
@@ -53,9 +57,13 @@ public final class SettingsStore {
     }
 
     private ApiProtocol read() throws IOException {
-        if (!Files.exists(file)) return ApiProtocol.CHAT_COMPLETIONS;
+        if (!Files.exists(file)) {
+            return ApiProtocol.CHAT_COMPLETIONS;
+        }
         Settings settings = json.readValue(file.toFile(), Settings.class);
-        if (settings.protocol() == null) throw new IOException("settings.json must contain a valid protocol");
+        if (settings.protocol() == null) {
+            throw new IOException("settings.json must contain a valid protocol");
+        }
         return settings.protocol();
     }
 
@@ -65,6 +73,9 @@ public final class SettingsStore {
         return Files.isRegularFile(module.resolve("pom.xml")) ? module : current;
     }
 
-    record Settings(ApiProtocol protocol) {}
-    record SettingsStatus(ApiProtocol activeProtocol, ApiProtocol savedProtocol, boolean restartRequired) {}
+    record Settings(ApiProtocol protocol) {
+    }
+
+    record SettingsStatus(ApiProtocol activeProtocol, ApiProtocol savedProtocol, boolean restartRequired) {
+    }
 }

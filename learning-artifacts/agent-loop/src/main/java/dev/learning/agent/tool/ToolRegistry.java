@@ -19,17 +19,30 @@ public final class ToolRegistry {
 
     public void register(AgentTool tool) {
         String name = tool.definition().function().name();
-        if (tools.putIfAbsent(name, tool) != null) throw new IllegalArgumentException("duplicate tool: " + name);
+        if (tools.putIfAbsent(name, tool) != null) {
+            throw new IllegalArgumentException("duplicate tool: " + name);
+        }
     }
 
-    public List<ToolSpec> definitions() { return tools.values().stream().map(AgentTool::definition).toList(); }
-    public java.util.Set<String> names() { return java.util.Set.copyOf(tools.keySet()); }
+    public List<ToolSpec> definitions() {
+        return tools.values().stream().map(AgentTool::definition).toList();
+    }
+
+    public java.util.Set<String> names() {
+        return java.util.Set.copyOf(tools.keySet());
+    }
+
     public ToolInput decode(String name, String arguments) throws IOException {
         AgentTool tool = find(name);
-        if (tool == null) throw new IOException("unknown tool " + name);
+        if (tool == null) {
+            throw new IOException("unknown tool " + name);
+        }
         return tool.decode(arguments);
     }
-    public AgentTool find(String name) { return tools.get(name); }
+
+    public AgentTool find(String name) {
+        return tools.get(name);
+    }
 
     public String dispatch(ToolCall call) {
         AgentTool tool = tools.get(call.function().name());

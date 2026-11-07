@@ -14,25 +14,32 @@ import java.math.MathContext;
 public final class CalculatorTool implements AgentTool {
     private final ObjectMapper json;
 
-    public CalculatorTool(ObjectMapper json) { this.json = json; }
+    public CalculatorTool(ObjectMapper json) {
+        this.json = json;
+    }
 
     public ToolInput decode(String arguments) throws java.io.IOException {
         return new CalculatorInput(ToolInputDecoder.oneString(arguments, "expression", 200));
     }
 
     public ToolSpec definition() {
-        return new ToolSpec("function", new FunctionSpec("calculator",
-                "Calculate basic arithmetic using +, -, *, / and parentheses.",
+        return new ToolSpec("function",
+            new FunctionSpec("calculator", "Calculate basic arithmetic using +, -, *, / and parentheses.",
                 ParameterSchema.oneString("expression", "The arithmetic expression to calculate.")));
     }
 
     public ToolResult execute(ToolInput input, RunScope scope, RunContext context) throws Exception {
-        if (!(input instanceof CalculatorInput args)) throw new IllegalArgumentException("expected calculator arguments");
-        if (context != null) context.control().check();
+        if (!(input instanceof CalculatorInput args)) {
+            throw new IllegalArgumentException("expected calculator arguments");
+        }
+        if (context != null) {
+            context.control().check();
+        }
         return new ToolResult(ToolStatus.SUCCESS, new Parser(args.expression()).parse(), null, true, true, false);
     }
 
-    record CalculatorArgs(String expression) {}
+    record CalculatorArgs(String expression) {
+    }
 
     private static final class Parser {
         private final String input;
@@ -40,14 +47,18 @@ public final class CalculatorTool implements AgentTool {
         private int operations;
 
         Parser(String input) {
-            if (input == null || input.length() > 200) throw new IllegalArgumentException("expression is missing or too long");
+            if (input == null || input.length() > 200) {
+                throw new IllegalArgumentException("expression is missing or too long");
+            }
             this.input = input;
         }
 
         String parse() {
             BigDecimal result = expression(0);
             space();
-            if (pos != input.length()) throw new IllegalArgumentException("unexpected character at " + pos);
+            if (pos != input.length()) {
+                throw new IllegalArgumentException("unexpected character at " + pos);
+            }
             return result.stripTrailingZeros().toPlainString();
         }
 
@@ -55,9 +66,13 @@ public final class CalculatorTool implements AgentTool {
             BigDecimal left = term(depth + 1);
             while (true) {
                 space();
-                if (take('+')) left = left.add(term(depth + 1));
-                else if (take('-')) left = left.subtract(term(depth + 1));
-                else return left;
+                if (take('+')) {
+                    left = left.add(term(depth + 1));
+                } else if (take('-')) {
+                    left = left.subtract(term(depth + 1));
+                } else {
+                    return left;
+                }
                 limit();
             }
         }
@@ -66,34 +81,73 @@ public final class CalculatorTool implements AgentTool {
             BigDecimal left = factor(depth + 1);
             while (true) {
                 space();
-                if (take('*')) left = left.multiply(factor(depth + 1), MathContext.DECIMAL64);
-                else if (take('/')) left = left.divide(factor(depth + 1), MathContext.DECIMAL64);
-                else return left;
+                if (take('*')) {
+                    left = left.multiply(factor(depth + 1), MathContext.DECIMAL64);
+                } else if (take('/')) {
+                    left = left.divide(factor(depth + 1), MathContext.DECIMAL64);
+                } else {
+                    return left;
+                }
                 limit();
             }
         }
 
         private BigDecimal factor(int depth) {
-            if (depth > 40) throw new IllegalArgumentException("expression nesting too deep");
+            if (depth > 40) {
+                throw new IllegalArgumentException("expression nesting too deep");
+            }
             space();
-            if (take('+')) return factor(depth + 1);
-            if (take('-')) return factor(depth + 1).negate();
+            if (take('+')) {
+                return factor(depth + 1);
+            }
+            if (take('-')) {
+                return factor(depth + 1).negate();
+            }
             if (take('(')) {
                 BigDecimal value = expression(depth + 1);
                 space();
-                if (!take(')')) throw new IllegalArgumentException("missing closing parenthesis");
+                if (!take(')')) {
+                    throw new IllegalArgumentException("missing closing parenthesis");
+                }
                 return value;
             }
             int start = pos;
-            while (pos < input.length() && Character.isDigit(input.charAt(pos))) pos++;
-            if (take('.')) while (pos < input.length() && Character.isDigit(input.charAt(pos))) pos++;
-            if (start == pos) throw new IllegalArgumentException("expected number at " + pos);
-            try { return new BigDecimal(input.substring(start, pos)); }
-            catch (NumberFormatException ex) { throw new IllegalArgumentException("invalid number"); }
+            while (pos < input.length() && Character.isDigit(input.charAt(pos))) {
+                pos++;
+            }
+            if (take('.')) {
+                while (pos < input.length() && Character.isDigit(input.charAt(pos))) {
+                    pos++;
+                }
+            }
+            if (start == pos) {
+                throw new IllegalArgumentException("expected number at " + pos);
+            }
+            try {
+                return new BigDecimal(input.substring(start, pos));
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("invalid number");
+            }
         }
 
-        private void limit() { if (++operations > 100) throw new IllegalArgumentException("too many operations"); }
-        private void space() { while (pos < input.length() && Character.isWhitespace(input.charAt(pos))) pos++; }
-        private boolean take(char c) { if (pos < input.length() && input.charAt(pos) == c) { pos++; return true; } return false; }
+        private void limit() {
+            if (++operations > 100) {
+                throw new IllegalArgumentException("too many operations");
+            }
+        }
+
+        private void space() {
+            while (pos < input.length() && Character.isWhitespace(input.charAt(pos))) {
+                pos++;
+            }
+        }
+
+        private boolean take(char c) {
+            if (pos < input.length() && input.charAt(pos) == c) {
+                pos++;
+                return true;
+            }
+            return false;
+        }
     }
 }

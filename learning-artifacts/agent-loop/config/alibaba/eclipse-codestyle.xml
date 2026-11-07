@@ -323,7 +323,7 @@
         <setting id="org.eclipse.jdt.core.formatter.insert_space_before_opening_paren_in_while" value="insert"/>
 
         <!--org.eclipse.jdt.core.formatter.insert_space_after_closing_paren_in_cast=Java:SPACE_AFTER_TYPE_CAST-->
-        <setting id="org.eclipse.jdt.core.formatter.insert_space_after_closing_paren_in_cast" value="do not insert"/>
+        <setting id="org.eclipse.jdt.core.formatter.insert_space_after_closing_paren_in_cast" value="insert"/>
 
         <!--org.eclipse.jdt.core.formatter.insert_space_before_opening_paren_in_method_declaration=Java:SPACE_BEFORE_METHOD_PARENTHESES-->
         <setting id="org.eclipse.jdt.core.formatter.insert_space_before_opening_paren_in_method_declaration"

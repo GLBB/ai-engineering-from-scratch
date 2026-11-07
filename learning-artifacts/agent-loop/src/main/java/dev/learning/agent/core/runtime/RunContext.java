@@ -10,26 +10,41 @@ import java.util.UUID;
 
 public interface RunContext {
     UUID requestId();
+
     AgentMode mode();
+
     RunBudget budget();
+
     RunControl control();
+
     RunEvents events();
+
     EvidenceStore evidence();
+
     ModelGateway model();
+
     ToolExecutionService tools();
+
     ApprovalGateway approvals();
-    default RunTelemetry telemetry() { return RunTelemetry.NOOP; }
+
+    default RunTelemetry telemetry() {
+        return RunTelemetry.NOOP;
+    }
+
     default boolean needsInput() {
         return evidence().snapshot().stream().anyMatch(item -> item.result().status() == ToolStatus.NEEDS_INPUT);
     }
+
     default String inputSummary() {
-        return "还需要补充信息才能继续：\n" + evidence().snapshot().stream()
-                .filter(item -> item.result().status() == ToolStatus.NEEDS_INPUT)
+        return "还需要补充信息才能继续：\n"
+            + evidence().snapshot().stream().filter(item -> item.result().status() == ToolStatus.NEEDS_INPUT)
                 .map(item -> item.result().content()).collect(Collectors.joining("\n"));
     }
+
     default void trace(RunScope scope, TraceEvent trace) {
         emit("trace", trace.scoped(requestId().toString(), mode(), scope));
     }
+
     default void emit(String type, Object data) {
         telemetry().runtimeEvent(type, data);
         events().emit(new RuntimeEvent(type, data));
