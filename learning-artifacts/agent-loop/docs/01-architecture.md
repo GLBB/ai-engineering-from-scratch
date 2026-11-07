@@ -47,6 +47,7 @@ flowchart LR
 | [deepseek](../src/main/java/dev/learning/agent/deepseek/) | HTTP 报文与 SSE 适配，协议 DTO 留在其 model 子包。 | [ChatCompletionsClient](../src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) |
 | [tool](../src/main/java/dev/learning/agent/tool/) | 工具类型、参数解码、分发、执行和结果记录。 | [DefaultToolExecutionService](../src/main/java/dev/learning/agent/tool/DefaultToolExecutionService.java) |
 | [observability](../src/main/java/dev/learning/agent/observability/) | OTel SDK、字段映射、内容过滤和用量归一化。 | [OtelRunTelemetry](../src/main/java/dev/learning/agent/observability/OtelRunTelemetry.java) |
+| [telemetry](../src/main/java/dev/learning/agent/telemetry/) | 不依赖 SDK 的属性 record 与 `@OtelAttribute` 映射声明。 | [SpanAttributes](../src/main/java/dev/learning/agent/telemetry/SpanAttributes.java) |
 | [support/json](../src/main/java/dev/learning/agent/support/json/) | 通用严格 JSON 操作。 | [StrictJson](../src/main/java/dev/learning/agent/support/json/StrictJson.java) |
 | [static](../src/main/resources/static/) | 页面、交互、模式状态与轨迹。 | [app.js](../src/main/resources/static/app.js) |
 
@@ -65,6 +66,11 @@ flowchart LR
 `RunLease` 留在 `app.chat`，因为它直接协调 HTTP 异步执行、EventSink 与 BrowserApproval。核心仍通过 ApprovalGateway 获取确认结果，无需了解浏览器交互。
 
 `core.runtime` 定义 RunTelemetry / TraceSpan / ExternalObserver / TelemetryFactory，默认 Noop。`observability` 实现这些接口并持有 OTel SDK；Runner、Gateway 和工具描述运行事实，不导入 SDK 或 Langfuse 类型。天气服务只注入 ExternalObserver，既不知道 Session，也不依赖 Agent 的完整 RunContext。RunLease 接受请求时创建根，工作线程临时激活 Context，所有子操作结束并完成清理后关闭根。
+
+`TraceSpan.attributes` 接收 `telemetry.SpanAttributes`，具体 record 通过自定义 `@OtelAttribute` 声明字段 Key。
+公共属性与 Langfuse 专属声明分别放在 `SpanAttributes` 和 `LangfuseAttributes`；后者仅由观测适配层使用。
+`OtelAttributeWriter` 缓存 record 映射并在工厂初始化时校验已声明的生产属性类型、空 Key 和重复 Key。
+注解只做直接映射，token 归一化、内容限制和错误状态仍由现有逻辑处理；它不创建 Span，也不改变关闭责任。
 
 每轮一个 trace，同一 Session 共用不可用于访问 API 的观测 ID；访问凭据不导出。页面实时轨迹继续通过 NDJSON 更新，Langfuse 用于持久查询；两者通过 requestId / traceId 对照。具体树形及源码入口见 [Trace 阅读指南](07-reading-agent-traces.md)。
 

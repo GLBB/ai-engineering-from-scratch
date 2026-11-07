@@ -1,5 +1,6 @@
 package dev.learning.agent.tool;
 
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.core.runtime.RunContext;
 import dev.learning.agent.core.runtime.RunScope;
 import dev.learning.agent.core.runtime.TraceSpan;
@@ -83,7 +84,7 @@ public final class SearchTool implements AgentTool {
             } finally {
                 cancellation.close();
             }
-            span.attribute("http.response.status_code", response.statusCode());
+            span.attributes(new SpanAttributes.HttpResponse(response.statusCode()));
             if (response.statusCode() >= 400) {
                 span.error("HTTP_" + response.statusCode());
             }

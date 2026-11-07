@@ -6,6 +6,24 @@
 
 想先看完整展开效果，可直接阅读[三模式 Span 树对照](#9-接入后的完整-span-树)；想沿着已发生的请求复盘，从[真实 Trace](#10-用真实-trace-复盘)开始。
 
+属性声明集中在 [SpanAttributes](../src/main/java/dev/learning/agent/telemetry/SpanAttributes.java)
+和 [LangfuseAttributes](../src/main/java/dev/learning/agent/telemetry/LangfuseAttributes.java)。
+自定义 `@OtelAttribute` 标注 record component，调用方使用类型明确的数据对象更新现有 Span：
+
+```java
+span.attributes(new SpanAttributes.HttpResponse(response.statusCode()));
+span.attributes(new SpanAttributes.TokenUsage(100L, 20L, 40L, null, null));
+```
+
+`OtelAttributeWriter` 将 `int` / `long` 写为 OTel Long，保留 Boolean、Double 和字符串数组类型。
+`null` 表示本次没有新值，不写入也不清除先前属性；`0`、`false`、空字符串和空数组仍会写入。
+仅显式标注的字段可以导出，不会自动展开业务对象或调用其 `toString()`。
+同一字段可以声明多个 Key，用于 Langfuse 的 trace / observation metadata。
+新增 record 放入对应声明接口，观测工厂初始化时会预校验映射；当前支持 String、int / Integer、
+long / Long、boolean / Boolean、double / Double、`List<String>`。
+注解不同于 OTel 官方的方法参数 `@SpanAttribute`，也不具备 `@WithSpan` 创建操作的能力。
+运行阶段、token 计算、内容限制、父子关系与取消清理继续沿用现有实现。
+
 ## 1. 先把四个概念分开
 
 | 概念 | 项目中的对象 | 怎样阅读 |

@@ -1,6 +1,8 @@
 package dev.learning.agent.observability;
 
 import dev.learning.agent.core.AgentMode;
+import dev.learning.agent.telemetry.OtelAttribute;
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.core.AgentRunner;
 import dev.learning.agent.core.CompletionCheck;
 import dev.learning.agent.core.ExecutionRequest;
@@ -265,7 +267,7 @@ class OtelTelemetryTest {
                     factory.open(session, new ExecutionRequest(UUID.randomUUID(), "task", ModelSettings.defaults()),
                         AgentMode.REACT, "Chat Completions");
                 try (var active = trace.activate(); var span = factory.external().operation("test-child")) {
-                    span.attribute("test.session", session);
+                    span.attributes(new SessionAttributes(session));
                 } finally {
                     trace.end();
                 }
@@ -329,4 +331,8 @@ class OtelTelemetryTest {
         assertEquals(StatusCode.ERROR, generation.getStatus().getStatusCode());
         assertFalse(generation.getAttributes().toString().contains("sensitive error"));
     }
+
+    public record SessionAttributes(@OtelAttribute("test.session") String session) implements SpanAttributes {
+    }
+
 }

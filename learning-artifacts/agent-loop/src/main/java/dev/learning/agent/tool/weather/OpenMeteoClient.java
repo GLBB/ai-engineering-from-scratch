@@ -1,5 +1,6 @@
 package dev.learning.agent.tool.weather;
 
+import dev.learning.agent.telemetry.SpanAttributes;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -261,7 +262,7 @@ public final class OpenMeteoClient implements WeatherProvider {
         AutoCloseable cancellation = call.control().onCancel(() -> future.cancel(true));
         try {
             HttpResponse<byte[]> response = future.get(timeout, TimeUnit.MILLISECONDS);
-            span.attribute("http.response.status_code", response.statusCode());
+            span.attributes(new SpanAttributes.HttpResponse(response.statusCode()));
             if (response.statusCode() >= 400) {
                 span.error("HTTP_" + response.statusCode());
             }

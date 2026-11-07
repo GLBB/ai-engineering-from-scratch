@@ -6,6 +6,7 @@ import dev.learning.agent.core.runtime.ExternalObserver;
 import dev.learning.agent.core.runtime.RunTelemetry;
 import dev.learning.agent.core.runtime.TelemetryFactory;
 import dev.learning.agent.core.runtime.TraceSpan;
+import dev.learning.agent.telemetry.SpanAttributes;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.SpanKind;
@@ -48,12 +49,9 @@ public final class OtelTelemetryFactory implements TelemetryFactory {
                 return TraceSpan.NOOP;
             }
             TraceSpan span = run.operation(method, "span", SpanKind.CLIENT, null);
-            span.attribute("http.request.method", method);
-            span.attribute("server.address", endpoint.getHost());
-            span.attribute("server.port",
-                endpoint.getPort() < 0 ? ("https".equals(endpoint.getScheme()) ? 443 : 80) : endpoint.getPort());
-            span.attribute("url.scheme", endpoint.getScheme());
-            span.attribute("url.path", endpoint.getPath());
+            int port = endpoint.getPort() < 0 ? ("https".equals(endpoint.getScheme()) ? 443 : 80) : endpoint.getPort();
+            span.attributes(new SpanAttributes.HttpRequest(method, endpoint.getHost(), port, endpoint.getScheme(),
+                endpoint.getPath()));
             return span;
         }
     };
@@ -65,6 +63,7 @@ public final class OtelTelemetryFactory implements TelemetryFactory {
 
     private OtelTelemetryFactory(OpenTelemetry sdk, TraceContentPolicy content, String baseUrl, String projectId,
         String release, SdkTracerProvider ownedProvider) {
+        OtelAttributeWriter.validateSchemas();
         tracer = sdk.getTracer("dev.learning.agent", "1.0");
         this.content = content;
         this.baseUrl = baseUrl;

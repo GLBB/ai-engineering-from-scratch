@@ -1,5 +1,6 @@
 package dev.learning.agent.deepseek;
 
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.core.runtime.RunControl;
 import dev.learning.agent.core.runtime.ExternalObserver;
 import dev.learning.agent.core.runtime.TraceSpan;
@@ -83,13 +84,13 @@ final class StreamingHttp {
                 unregister(requestCancellation);
             }
             if (response.statusCode() != 200) {
-                span.attribute("http.response.status_code", response.statusCode());
+                span.attributes(new SpanAttributes.HttpResponse(response.statusCode()));
                 span.error("HTTP_" + response.statusCode());
                 response.body().close();
                 throw new IOException("DeepSeek returned HTTP " + response.statusCode());
             }
             InputStream input = response.body();
-            span.attribute("http.response.status_code", response.statusCode());
+            span.attributes(new SpanAttributes.HttpResponse(response.statusCode()));
             AutoCloseable cancellation = control.onCancel(() -> closeQuietly(input));
             var timedOut = new java.util.concurrent.atomic.AtomicBoolean();
             var deadline = TIMER.schedule(() -> {
@@ -117,7 +118,7 @@ final class StreamingHttp {
 
                 private void readFailed(IOException error) {
                     if (control.cancelled()) {
-                        span.attribute("agent_loop.cancelled", true);
+                        span.attributes(new SpanAttributes.Cancellation(true, null));
                     } else if (timedOut.get()) {
                         span.error("MODEL_HTTP_TIMEOUT");
                     } else {
@@ -135,7 +136,7 @@ final class StreamingHttp {
                             span.error("MODEL_HTTP_TIMEOUT");
                         }
                         if (control.cancelled()) {
-                            span.attribute("agent_loop.cancelled", true);
+                            span.attributes(new SpanAttributes.Cancellation(true, null));
                         }
                         span.close();
                     }

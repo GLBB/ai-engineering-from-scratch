@@ -390,3 +390,29 @@ Chat / Responses 原始 input 含缓存；Anthropic 的 input 不含缓存。实
 `mvn clean package` 通过 161 项 Java 测试，前端 10 项测试通过。新增测试覆盖 YAML 默认值、占位符解析、Spring 属性覆盖、关闭时的 Noop、配置校验和真实 OTLP HTTP 导出。
 
 本机 Langfuse [配置迁移验证 Trace](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/b245027742c1d98996192fb354f635f2) 已经 CLI 回读：1 个根、1 个本地 calculator 工具，输入 `1+2`、输出 `3`、状态 COMPLETE，父子关系正确，问题和回答预览存在。该验证没有调用外部模型或天气 API。
+
+### 11.5 类型化属性声明（2026-11-07）
+
+`telemetry.SpanAttributes` 与 `LangfuseAttributes` 使用 record 声明属性，组件上的自定义
+`@OtelAttribute` 指定 Key，`aliases` 支持同一值映射到 trace / observation metadata。
+`TraceSpan.attributes` 只接受这些类型明确的属性对象；`OtelAttributeWriter` 缓存映射，
+并在观测工厂初始化时校验生产声明。原有 96 个 Span / 事件属性 Key 全部保留。
+这次只迁移属性声明和写入，Span 生命周期、父子关系、用量归一化和内容限制继续使用原实现。
+
+支持的类型为 String、int / Integer、long / Long、boolean / Boolean、double / Double、
+`List<String>`；`null` 不写入且不覆盖已有值，`0` 与 `false` 保留。
+只读取标注组件，不展开任意对象。Resource 属性和事件名称不属于此次 Span 属性迁移。
+
+`mvn -Pquality verify` 通过 179 项 Java 测试，含 11 项新增映射测试；
+`java_quality.py check --base origin/main`、课程审计、认证审计和 README 计数检查通过。
+使用当前构建向本机 Langfuse 导出三模式真实计算器请求，均为 COMPLETE，答案为 46：
+
+| 模式 | 真实 Trace | 模型 / 工具 / HTTP / 总 span |
+| --- | --- | --- |
+| ReAct | [打开 Trace](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/2f55839839ff40764d5a9ac1248fca26) | 2 / 1 / 2 / 6 |
+| ReWOO | [打开 Trace](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/86ef99cdb58f7b9460ae6b807e0f5b0f) | 2 / 2 / 2 / 11 |
+| Plan and Execute | [打开 Trace](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/91b13a22b78d0ca05c054f41634ad059) | 5 / 1 / 5 / 16 |
+
+三条 Trace 已通过 CLI 回读校验：同一观测 Session、父子关系完整、模型和工具数量与运行计数一致、
+模型名称及 token 用量存在且归一化没有重复累计。此次没有真实调用天气、搜索或 Bash；
+这些路径由现有确定性测试覆盖。

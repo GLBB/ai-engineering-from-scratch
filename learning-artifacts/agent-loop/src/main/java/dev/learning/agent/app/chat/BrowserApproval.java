@@ -1,5 +1,6 @@
 package dev.learning.agent.app.chat;
 
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.core.runtime.RunControl;
 import dev.learning.agent.core.runtime.RunScope;
 import dev.learning.agent.core.runtime.ExternalObserver;
@@ -39,7 +40,7 @@ final class BrowserApproval {
 
     boolean request(String kind, String content, RunScope scope, RunControl control) {
         try (TraceSpan span = observer.operation("agent_loop.approval.wait")) {
-            span.attribute("agent_loop.approval.kind", kind.equals("command") ? "command" : "output");
+            span.attributes(new SpanAttributes.ApprovalKind(kind.equals("command") ? "command" : "output"));
             return waitForDecision(kind, content, scope, control, span);
         }
     }
@@ -59,12 +60,12 @@ final class BrowserApproval {
                 new ApprovalEvent(request.id(), kind, content, scope == null ? null : scope.stepId()));
             boolean approved = request.decision().get(
                 control == null ? 300_000 : Math.min(300_000, control.remaining().toMillis()), TimeUnit.MILLISECONDS);
-            span.attribute("agent_loop.approval.outcome",
-                control != null && control.cancelled() ? "cancelled" : approved ? "approved" : "denied");
+            span.attributes(new SpanAttributes.ApprovalOutcome(
+                control != null && control.cancelled() ? "cancelled" : approved ? "approved" : "denied"));
             return approved;
         } catch (Exception e) {
-            span.attribute("agent_loop.approval.outcome",
-                e instanceof java.util.concurrent.TimeoutException ? "expired" : "cancelled");
+            span.attributes(new SpanAttributes.ApprovalOutcome(
+                e instanceof java.util.concurrent.TimeoutException ? "expired" : "cancelled"));
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }

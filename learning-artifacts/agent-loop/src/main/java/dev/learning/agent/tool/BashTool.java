@@ -1,5 +1,6 @@
 package dev.learning.agent.tool;
 
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.core.runtime.RunContext;
 import dev.learning.agent.core.runtime.RunScope;
 import dev.learning.agent.core.runtime.TraceSpan;
@@ -80,7 +81,7 @@ public final class BashTool implements AgentTool {
         long start = System.nanoTime();
         try {
             process = builder.start();
-            processSpan.attribute("process.executable.name", "bash");
+            processSpan.attributes(new SpanAttributes.ProcessStarted("bash"));
             AutoCloseable cancellation = context == null ? () -> {
             } : context.control().onCancel(() -> stop(process));
             Thread reader = new Thread(() -> output.drain(process), "bash-output-reader");
@@ -104,7 +105,7 @@ public final class BashTool implements AgentTool {
                 }
             }
             if (finished) {
-                processSpan.attribute("process.exit.code", process.exitValue());
+                processSpan.attributes(new SpanAttributes.ProcessExited(process.exitValue()));
                 if (process.exitValue() != 0) {
                     processSpan.error("BASH_EXIT_NONZERO");
                 }

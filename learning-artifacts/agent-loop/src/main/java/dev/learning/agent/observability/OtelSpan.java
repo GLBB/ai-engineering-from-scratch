@@ -1,8 +1,8 @@
 package dev.learning.agent.observability;
 
 import dev.learning.agent.core.runtime.TraceSpan;
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.common.Attributes;
+import dev.learning.agent.telemetry.LangfuseAttributes;
+import dev.learning.agent.telemetry.SpanAttributes;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
@@ -27,22 +27,12 @@ final class OtelSpan implements TraceSpan {
         this.end = end;
     }
 
-    public void attribute(String key, String value) {
-        if (value != null) {
-            span.setAttribute(key, value);
-        }
-    }
-
-    public void attribute(String key, long value) {
-        span.setAttribute(key, value);
-    }
-
-    public void attribute(String key, boolean value) {
-        span.setAttribute(key, value);
+    public void attributes(SpanAttributes attributes) {
+        OtelAttributeWriter.write(span, attributes);
     }
 
     public void event(String name, String code) {
-        span.addEvent(name, Attributes.of(AttributeKey.stringKey("agent_loop.code"), code));
+        span.addEvent(name, OtelAttributeWriter.attributes(new SpanAttributes.EventCode(code)));
     }
 
     public void error(String code) {
@@ -50,17 +40,16 @@ final class OtelSpan implements TraceSpan {
             return;
         }
         errored = true;
-        span.setAttribute("error.type", code);
-        span.setAttribute("langfuse.observation.level", "ERROR");
+        attributes(new SpanAttributes.Error(code));
+        attributes(new LangfuseAttributes.Level("ERROR"));
         span.setStatus(StatusCode.ERROR, code);
     }
 
     public void fail(Throwable error) {
         if (error instanceof InterruptedException || error instanceof java.util.concurrent.CancellationException) {
-            attribute("agent_loop.cancelled", true);
+            attributes(new SpanAttributes.Cancellation(true, null));
         } else if (error instanceof java.io.UncheckedIOException) {
-            attribute("agent_loop.cancelled", true);
-            attribute("agent_loop.cancel_reason", "CLIENT_DISCONNECTED");
+            attributes(new SpanAttributes.Cancellation(true, "CLIENT_DISCONNECTED"));
         } else if (error instanceof java.util.concurrent.TimeoutException
             || error instanceof java.net.SocketTimeoutException
             || error instanceof java.net.http.HttpTimeoutException) {

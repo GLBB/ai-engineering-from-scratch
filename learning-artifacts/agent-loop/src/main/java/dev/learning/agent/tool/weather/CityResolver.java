@@ -1,5 +1,6 @@
 package dev.learning.agent.tool.weather;
 
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.tool.weather.WeatherModels.GeoLocation;
 import dev.learning.agent.tool.weather.WeatherModels.LocationQuery;
 import dev.learning.agent.core.runtime.ExternalObserver;
@@ -54,7 +55,7 @@ public final class CityResolver {
         String city = query.city();
         List<GeoLocation> found = provider.search(query, city, call);
         if (found.isEmpty() && "CN".equals(query.countryCode()) && city.endsWith("市") && city.length() > 1) {
-            span.attribute("agent_loop.weather.fallback_used", true);
+            span.attributes(new SpanAttributes.WeatherFallback(true));
             city = city.substring(0, city.length() - 1);
             found = provider.search(query, city, call);
         }
@@ -68,16 +69,16 @@ public final class CityResolver {
             }
             unique.putIfAbsent(place.id(), place);
         }
-        span.attribute("agent_loop.weather.candidate_count", unique.size());
+        span.attributes(new SpanAttributes.WeatherCandidates(unique.size()));
         if (unique.isEmpty()) {
-            span.attribute("agent_loop.weather.resolution", "NOT_FOUND");
+            span.attributes(new SpanAttributes.WeatherResolution("NOT_FOUND"));
             return new NotFound(query.city());
         }
         if (unique.size() == 1 && same(city, unique.values().iterator().next().name())) {
-            span.attribute("agent_loop.weather.resolution", "RESOLVED");
+            span.attributes(new SpanAttributes.WeatherResolution("RESOLVED"));
             return new Resolved(unique.values().iterator().next(), city);
         }
-        span.attribute("agent_loop.weather.resolution", "AMBIGUOUS");
+        span.attributes(new SpanAttributes.WeatherResolution("AMBIGUOUS"));
         return new Ambiguous(unique.values().stream().limit(5).toList());
     }
 

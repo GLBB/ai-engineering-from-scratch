@@ -19,10 +19,10 @@ import dev.learning.agent.model.ModelRequest;
 import dev.learning.agent.model.OutputMode;
 import dev.learning.agent.model.TokenUsage;
 import dev.learning.agent.support.json.StrictJson;
+import dev.learning.agent.telemetry.LangfuseAttributes;
+import dev.learning.agent.telemetry.SpanAttributes;
 import dev.learning.agent.tool.ToolResult;
 import dev.learning.agent.tool.ToolStatus;
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.Tracer;
@@ -63,44 +63,27 @@ final class OtelRunTelemetry implements RunTelemetry {
         this.release = release;
         agent = "agent-loop." + mode.name().toLowerCase(Locale.ROOT);
         root = tracer.spanBuilder("invoke_agent " + agent).setNoParent().setSpanKind(SpanKind.INTERNAL)
-            .setAttribute("gen_ai.operation.name", "invoke_agent").setAttribute("gen_ai.agent.name", agent).startSpan();
+            .setAllAttributes(OtelAttributeWriter.attributes(new SpanAttributes.Operation("invoke_agent", agent)))
+            .startSpan();
         common(root, "agent");
-        root.setAttribute("agent_loop.run.started", false);
-        root.setAttribute("agent_loop.run.delivery", "not_confirmed");
+        OtelAttributeWriter.write(root, new SpanAttributes.RunAccepted(false, "not_confirmed"));
         context = Context.root().with(OtelTelemetryFactory.RUN, this).with(root);
         updateRootInput();
     }
 
     private void common(Span span, String type) {
-        span.setAttribute("langfuse.observation.type", type);
-        span.setAttribute("gen_ai.conversation.id", session);
-        span.setAttribute("langfuse.session.id", session);
-        span.setAttribute("langfuse.trace.name", "invoke_agent " + agent);
-        span.setAttribute("langfuse.environment", "local");
-        span.setAttribute("langfuse.release", release);
-        span.setAttribute("agent_loop.semconv.revision", OtelTelemetryFactory.SEMCONV);
-        span.setAttribute("agent_loop.request.id", request.requestId().toString());
-        span.setAttribute("agent_loop.mode", mode);
-        span.setAttribute("agent_loop.protocol", protocol);
-        for (String prefix : List.of("langfuse.trace.metadata.", "langfuse.observation.metadata.")) {
-            span.setAttribute(prefix + "mode", mode);
-            span.setAttribute(prefix + "protocol", protocol);
-            span.setAttribute(prefix + "requestId", request.requestId().toString());
-        }
+        OtelAttributeWriter.write(span, new SpanAttributes.RunContext(session, OtelTelemetryFactory.SEMCONV,
+            request.requestId().toString(), mode, protocol));
+        OtelAttributeWriter.write(span, new LangfuseAttributes.Context(type, session, "invoke_agent " + agent, "local",
+            release, mode, protocol, request.requestId().toString()));
     }
 
     private void scope(Span span, RunScope scope) {
         if (scope == null) {
             return;
         }
-        span.setAttribute("agent_loop.phase", scope.phase());
-        span.setAttribute("langfuse.observation.metadata.phase", scope.phase());
-        if (scope.stepId() != null) {
-            span.setAttribute("agent_loop.step.id", scope.stepId());
-            span.setAttribute("langfuse.observation.metadata.stepId", scope.stepId());
-        }
-        span.setAttribute("agent_loop.plan.revision", scope.revision());
-        span.setAttribute("langfuse.observation.metadata.revision", scope.revision());
+        OtelAttributeWriter.write(span, new SpanAttributes.Phase(scope.phase(), scope.stepId(), scope.revision()));
+        OtelAttributeWriter.write(span, new LangfuseAttributes.Phase(scope.phase(), scope.stepId(), scope.revision()));
     }
 
     OtelSpan operation(String name, String type, SpanKind kind, RunScope scope) {
@@ -111,7 +94,7 @@ final class OtelRunTelemetry implements RunTelemetry {
     }
 
     public TraceSpan activate() {
-        root.setAttribute("agent_loop.run.started", true);
+        OtelAttributeWriter.write(root, new SpanAttributes.RunStarted(true));
         root.addEvent("agent_loop.run.started");
         return new OtelSpan(root, context.makeCurrent(), false);
     }
@@ -130,8 +113,7 @@ final class OtelRunTelemetry implements RunTelemetry {
         };
         var span = operation(name, "chain", SpanKind.INTERNAL, scope);
         if (scope.phase().equals("PLAN")) {
-            span.attribute("gen_ai.operation.name", "plan");
-            span.attribute("gen_ai.agent.name", agent);
+            span.attributes(new SpanAttributes.Operation("plan", agent));
         }
         return span;
     }
@@ -142,18 +124,13 @@ final class OtelRunTelemetry implements RunTelemetry {
             restrictContent();
         }
         var span = operation("chat " + model.settings().model(), "generation", SpanKind.CLIENT, scope);
-        span.attribute("gen_ai.operation.name", "chat");
-        span.attribute("gen_ai.provider.name", "deepseek");
-        span.attribute("gen_ai.request.model", model.settings().model());
-        span.attribute("gen_ai.request.max_tokens", model.maxOutputTokens());
-        span.attribute("gen_ai.request.reasoning.level", model.settings().apiReasoningEffort());
-        span.attribute("agent_loop.model.reasoning_level", model.settings().reasoningLevel());
-        span.attribute("gen_ai.output.type", model.outputMode() == OutputMode.JSON_OBJECT ? "json" : "text");
-        span.attribute("agent_loop.model.round", round);
-        span.attribute("agent_loop.model.use", model.use().name());
-        span.attribute("agent_loop.model.message_count", model.messages().size());
-        span.attribute("langfuse.observation.input",
-            StrictJson.write(new ModelInput(model.messages().size(), model.tools().size(), model.use().name())));
+        span.attributes(new SpanAttributes.Operation("chat", null));
+        span.attributes(new SpanAttributes.ModelRequest("deepseek", model.settings().model(), model.maxOutputTokens(),
+            model.settings().apiReasoningEffort(), model.settings().reasoningLevel(),
+            model.outputMode() == OutputMode.JSON_OBJECT ? "json" : "text", round, model.use().name(),
+            model.messages().size()));
+        span.attributes(new LangfuseAttributes.Input(
+            StrictJson.write(new ModelInput(model.messages().size(), model.tools().size(), model.use().name()))));
         return span;
     }
 
@@ -164,12 +141,12 @@ final class OtelRunTelemetry implements RunTelemetry {
         long elapsed = (System.nanoTime() - span.started) / 1_000_000;
         if (span.firstChunk == null) {
             span.firstChunk = elapsed;
-            span.attribute("agent_loop.model.first_chunk_ms", elapsed);
-            span.attribute("langfuse.observation.completion_start_time", Instant.now().toString());
+            span.attributes(new SpanAttributes.ModelFirstChunk(elapsed));
+            span.attributes(new LangfuseAttributes.CompletionStart(Instant.now().toString()));
         }
         if (text && span.firstText == null) {
             span.firstText = elapsed;
-            span.attribute("agent_loop.model.first_text_ms", elapsed);
+            span.attributes(new SpanAttributes.ModelFirstText(elapsed));
         }
     }
 
@@ -181,19 +158,13 @@ final class OtelRunTelemetry implements RunTelemetry {
             || answer.content().toLowerCase(Locale.ROOT).contains("bash")) {
             restrictContent();
         }
-        span.span.setAttribute(AttributeKey.stringArrayKey("gen_ai.response.finish_reasons"),
-            List.of(answer.finishReason()));
-        span.attribute("agent_loop.model.tool_call_count", answer.calls().size());
-        if (answer.metadata() != null) {
-            span.attribute("gen_ai.response.id", answer.metadata().id());
-            span.attribute("gen_ai.response.model", answer.metadata().model());
-        }
-        span.attribute("agent_loop.model.reasoning_characters",
-            answer.reasoningContent() == null ? 0 : answer.reasoningContent().length());
-        span.attribute("langfuse.observation.output",
-            StrictJson.write(new ModelOutput(answer.finishReason(),
-                answer.calls().stream().limit(16).map(c -> toolName(c.function().name())).toList(),
-                answer.content().length(), content.preview(answer.content(), restricted.get()))));
+        span.attributes(new SpanAttributes.ModelResponse(List.of(answer.finishReason()), answer.calls().size(),
+            answer.metadata() == null ? null : answer.metadata().id(),
+            answer.metadata() == null ? null : answer.metadata().model(),
+            answer.reasoningContent() == null ? 0 : answer.reasoningContent().length()));
+        span.attributes(new LangfuseAttributes.Output(StrictJson.write(new ModelOutput(answer.finishReason(),
+            answer.calls().stream().limit(16).map(c -> toolName(c.function().name())).toList(),
+            answer.content().length(), content.preview(answer.content(), restricted.get())))));
         if (!span.sawUsage) {
             modelUsage(span, answer.usage(), true);
         }
@@ -204,7 +175,7 @@ final class OtelRunTelemetry implements RunTelemetry {
             return;
         }
         span.sawUsage = true;
-        span.attribute("agent_loop.model.usage_complete", complete);
+        span.attributes(new SpanAttributes.ModelUsageComplete(complete));
         UsageMapping.apply(span, usage);
     }
 
@@ -215,13 +186,10 @@ final class OtelRunTelemetry implements RunTelemetry {
         String known = toolName(name);
         var span = operation("execute_tool " + known, "tool", SpanKind.INTERNAL, scope);
         span.tool = known;
-        span.attribute("gen_ai.operation.name", "execute_tool");
-        span.attribute("gen_ai.tool.name", known);
-        span.attribute("gen_ai.tool.type", "function");
-        span.attribute("gen_ai.tool.call.id", nativeId);
-        span.attribute("agent_loop.evidence.id", evidenceId);
-        span.attribute("langfuse.observation.input",
-            StrictJson.write(content.toolInput(known, arguments, restricted.get())));
+        span.attributes(new SpanAttributes.Operation("execute_tool", null));
+        span.attributes(new SpanAttributes.ToolCall(known, "function", nativeId, evidenceId));
+        span.attributes(
+            new LangfuseAttributes.Input(StrictJson.write(content.toolInput(known, arguments, restricted.get()))));
         return span;
     }
 
@@ -229,21 +197,16 @@ final class OtelRunTelemetry implements RunTelemetry {
         if (!(operation instanceof OtelSpan span)) {
             return;
         }
-        span.attribute("agent_loop.tool.status", result.status().name());
-        span.attribute("agent_loop.tool.executed", result.executed());
-        span.attribute("agent_loop.tool.has_value", result.hasValue());
-        span.attribute("agent_loop.tool.truncated", result.truncated());
-        span.attribute("agent_loop.tool.error_code", result.errorCode());
-        span.attribute("agent_loop.tool.cached", result.status() == ToolStatus.SUCCESS && !result.executed());
+        span.attributes(new SpanAttributes.ToolResult(result.status().name(), result.executed(), result.hasValue(),
+            result.truncated(), result.errorCode(), result.status() == ToolStatus.SUCCESS && !result.executed()));
         boolean allow = List.of("calculator", "current_weather", "weather_forecast").contains(span.tool);
-        span.attribute("langfuse.observation.output",
-            StrictJson
-                .write(new ToolOutput(result.status().name(), result.executed(), result.hasValue(), result.truncated(),
-                    result.sources().size(), content.preview(result.content(), restricted.get() || !allow))));
+        span.attributes(new LangfuseAttributes.Output(StrictJson
+            .write(new ToolOutput(result.status().name(), result.executed(), result.hasValue(), result.truncated(),
+                result.sources().size(), content.preview(result.content(), restricted.get() || !allow)))));
         if (result.status() == ToolStatus.ERROR || result.status() == ToolStatus.TIMEOUT) {
             span.error(result.errorCode() == null ? "TOOL_FAILED" : result.errorCode());
         } else if (result.status() == ToolStatus.DENIED || result.status() == ToolStatus.SKIPPED) {
-            span.attribute("langfuse.observation.level", "WARNING");
+            span.attributes(new LangfuseAttributes.Level("WARNING"));
         }
     }
 
@@ -251,68 +214,63 @@ final class OtelRunTelemetry implements RunTelemetry {
         Span span = Span.current();
         if (data instanceof Evidence evidence) {
             span.addEvent("agent_loop.evidence.saved",
-                Attributes.builder().put("agent_loop.evidence.id", evidence.id())
-                    .put("agent_loop.tool.status", evidence.result().status().name())
-                    .put("agent_loop.tool.executed", evidence.result().executed()).build());
+                OtelAttributeWriter.attributes(new SpanAttributes.EvidenceSaved(evidence.id(),
+                    evidence.result().status().name(), evidence.result().executed())));
             if (evidence.result().status() == ToolStatus.SKIPPED) {
                 span.addEvent("agent_loop.step.skipped");
             }
         } else if (data instanceof ModelJson.PlanDisplay plan) {
             int count = plan.plan() instanceof RewooPlan value ? value.steps().size()
                 : plan.plan() instanceof GoalPlan value ? value.steps().size() : 0;
-            span.setAttribute("agent_loop.plan.step_count", count);
-            span.addEvent("agent_loop.plan.accepted", Attributes.builder()
-                .put("agent_loop.plan.revision", plan.revision()).put("agent_loop.plan.step_count", count).build());
+            OtelAttributeWriter.write(span, new SpanAttributes.PlanStepCount(count));
+            span.addEvent("agent_loop.plan.accepted",
+                OtelAttributeWriter.attributes(new SpanAttributes.PlanAccepted(plan.revision(), count)));
         } else if (data instanceof ReplanDecision decision) {
             String value = decision instanceof ReplanDecision.ReviseDecision ? "REVISE"
                 : decision instanceof ReplanDecision.FinishDecision ? "FINISH"
                     : decision instanceof ReplanDecision.StopDecision ? "STOP" : "CONTINUE";
-            span.setAttribute("agent_loop.plan.decision", value);
-            span.addEvent("agent_loop.plan.decision",
-                Attributes.of(AttributeKey.stringKey("agent_loop.plan.decision"), value));
+            var attributes = new SpanAttributes.PlanDecision(value);
+            OtelAttributeWriter.write(span, attributes);
+            span.addEvent("agent_loop.plan.decision", OtelAttributeWriter.attributes(attributes));
         } else if (data instanceof StepResult result) {
-            span.setAttribute("agent_loop.step.status", result.status().name());
-            span.setAttribute(AttributeKey.stringArrayKey("agent_loop.step.evidence_ids"), result.evidenceIds());
-            span.setAttribute("langfuse.observation.output", StrictJson.write(new StepOutput(result.status().name(),
-                result.evidenceIds(), content.preview(result.summary(), restricted.get()))));
+            OtelAttributeWriter.write(span,
+                new SpanAttributes.StepResult(result.status().name(), result.evidenceIds()));
+            OtelAttributeWriter.write(span,
+                new LangfuseAttributes.Output(StrictJson.write(new StepOutput(result.status().name(),
+                    result.evidenceIds(), content.preview(result.summary(), restricted.get())))));
             span.addEvent("agent_loop.step.result");
         }
     }
 
     public void event(String name, String code) {
-        Span.current().addEvent(name, Attributes.of(AttributeKey.stringKey("agent_loop.code"), code));
+        Span.current().addEvent(name, OtelAttributeWriter.attributes(new SpanAttributes.EventCode(code)));
     }
 
     public void toolHttpRequests(int count) {
-        Span.current().setAttribute("agent_loop.tool.http_requests", count);
+        OtelAttributeWriter.write(Span.current(), new SpanAttributes.ToolHttpRequests(count));
     }
 
     public void completed(RunResult result) {
-        root.setAttribute("agent_loop.run.status", result.status().name());
-        root.setAttribute("agent_loop.run.completion_check", result.completionCheck().name());
-        if (result.errorCode() != null) {
-            root.setAttribute("agent_loop.run.error_code", result.errorCode());
-        }
+        OtelAttributeWriter.write(root,
+            new SpanAttributes.RunResult(result.status().name(), result.completionCheck().name(), result.errorCode()));
         var count = result.counters();
-        root.setAttribute("agent_loop.budget.model_calls", count.modelCalls());
-        root.setAttribute("agent_loop.budget.tool_attempts", count.toolAttempts());
-        root.setAttribute("agent_loop.budget.tools_executed", count.toolsExecuted());
-        root.setAttribute("agent_loop.budget.step_attempts", count.stepAttempts());
-        root.setAttribute("agent_loop.budget.plan_revisions", count.planRevisions());
-        root.setAttribute("langfuse.observation.output",
-            StrictJson.write(new RunOutput(result.status().name(), result.completionCheck().name(),
-                result.answer().length(), content.preview(result.answer(), restricted.get()))));
+        OtelAttributeWriter.write(root, new SpanAttributes.RunCounters(count.modelCalls(), count.toolAttempts(),
+            count.toolsExecuted(), count.stepAttempts(), count.planRevisions()));
+        OtelAttributeWriter.write(root,
+            new LangfuseAttributes.Output(
+                StrictJson.write(new RunOutput(result.status().name(), result.completionCheck().name(),
+                    result.answer().length(), content.preview(result.answer(), restricted.get())))));
         if (result.status() == ExecutionStatus.FAILED) {
             new OtelSpan(root, () -> {
             }, false).error(result.errorCode() == null ? "RUN_FAILED" : result.errorCode());
         } else if (result.status() == ExecutionStatus.PARTIAL) {
-            root.setAttribute("langfuse.observation.level", "WARNING");
+            OtelAttributeWriter.write(root, new LangfuseAttributes.Level("WARNING"));
         }
     }
 
     public void failed(Throwable error, boolean cancelled) {
-        root.setAttribute("agent_loop.run.status",
-            cancelled || error instanceof java.io.UncheckedIOException ? "CANCELLED" : "FAILED");
+        OtelAttributeWriter.write(root, new SpanAttributes.RunResult(
+            cancelled || error instanceof java.io.UncheckedIOException ? "CANCELLED" : "FAILED", null, null));
         if (!cancelled) {
             new OtelSpan(root, () -> {
             }, false).fail(error);
@@ -320,24 +278,21 @@ final class OtelRunTelemetry implements RunTelemetry {
     }
 
     public void cancelled(boolean started) {
-        root.setAttribute("agent_loop.run.started", started);
+        OtelAttributeWriter.write(root, new SpanAttributes.RunStarted(started));
         if (cancelNoted.compareAndSet(false, true)) {
             root.addEvent("agent_loop.cancel.requested");
         }
         if (!started) {
-            root.setAttribute("agent_loop.run.status", "CANCELLED");
-            root.setAttribute("langfuse.observation.output",
-                StrictJson.write(new RunOutput("CANCELLED", "UNVERIFIED", 0, null)));
-            for (String counter : List.of("model_calls", "tool_attempts", "tools_executed", "step_attempts",
-                "plan_revisions")) {
-                root.setAttribute("agent_loop.budget." + counter, 0L);
-            }
+            OtelAttributeWriter.write(root, new SpanAttributes.RunResult("CANCELLED", null, null));
+            OtelAttributeWriter.write(root,
+                new LangfuseAttributes.Output(StrictJson.write(new RunOutput("CANCELLED", "UNVERIFIED", 0, null))));
+            OtelAttributeWriter.write(root, new SpanAttributes.RunCounters(0, 0, 0, 0, 0));
         }
     }
 
     public void restrictContent() {
         restricted.set(true);
-        root.setAttribute("agent_loop.content.omitted_reason", "BASH_CONTEXT");
+        OtelAttributeWriter.write(root, new SpanAttributes.ContentRestriction("BASH_CONTEXT"));
         updateRootInput();
     }
 
@@ -346,8 +301,9 @@ final class OtelRunTelemetry implements RunTelemetry {
     }
 
     private void updateRootInput() {
-        root.setAttribute("langfuse.observation.input", StrictJson.write(new RunInput(mode, request.settings().model(),
-            request.prompt().length(), content.preview(request.prompt(), restricted.get()))));
+        OtelAttributeWriter.write(root,
+            new LangfuseAttributes.Input(StrictJson.write(new RunInput(mode, request.settings().model(),
+                request.prompt().length(), content.preview(request.prompt(), restricted.get())))));
     }
 
     public String traceId() {
