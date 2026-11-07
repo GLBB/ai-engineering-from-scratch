@@ -3,6 +3,7 @@ package dev.learning.agent.model;
 import dev.learning.agent.core.runtime.RunContext;
 import dev.learning.agent.core.runtime.RunScope;
 import dev.learning.agent.core.runtime.TraceEvent;
+import dev.learning.agent.core.runtime.TraceSpan;
 
 import java.io.IOException;
 import java.util.function.Consumer;
@@ -16,36 +17,46 @@ public final class DefaultModelGateway implements ModelGateway {
     public AssistantTurn call(ModelRequest request, RunScope scope, Consumer<String> onText, RunContext context)
             throws IOException, InterruptedException {
         context.control().check();
-        context.budget().claimModel(request.use());
+        try { context.budget().claimModel(request.use()); }
+        catch (dev.learning.agent.core.runtime.BudgetExceededException error) {
+            context.telemetry().event("agent_loop.budget.exhausted", "MODEL"); throw error;
+        }
         int round = context.budget().snapshot().modelCalls();
-        String id = "model-" + context.requestId() + "-" + round;
-        long at = System.currentTimeMillis();
-        long start = System.nanoTime();
-        int count = request.messages().size();
-        context.trace(scope, TraceEvent.modelStarted(id, round, at, count));
-        AssistantTurn answer;
-        try {
-            int[] length = {0};
-            answer = client.stream(request, part -> {
-                if ((length[0] += part.length()) > 16_000) throw new IllegalStateException("model output too large");
-                onText.accept(part);
-            }, context.control());
-            context.control().check();
-            validate(answer);
-        } catch (IOException | InterruptedException | RuntimeException e) {
-            String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            context.trace(scope, TraceEvent.modelFailed(id, round, at, elapsed(start), count, reason));
-            throw e;
+        try (TraceSpan span = context.telemetry().model(request, scope, round)) {
+            String id = "model-" + context.requestId() + "-" + round;
+            long at = System.currentTimeMillis();
+            long start = System.nanoTime();
+            int count = request.messages().size();
+            context.trace(scope, TraceEvent.modelStarted(id, round, at, count));
+            AssistantTurn answer;
+            try {
+                int[] length = {0};
+                answer = client.stream(request, part -> {
+                    if ((length[0] += part.length()) > 16_000) throw new IllegalStateException("model output too large");
+                    onText.accept(part);
+                }, context.control(), new ModelStreamObserver() {
+                    public void chunk(boolean text) { context.telemetry().modelChunk(span, text); }
+                    public void usage(TokenUsage usage, boolean complete) { context.telemetry().modelUsage(span, usage, complete); }
+                });
+                context.control().check();
+                validate(answer);
+            } catch (IOException | InterruptedException | RuntimeException e) {
+                span.fail(e);
+                String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                context.trace(scope, TraceEvent.modelFailed(id, round, at, elapsed(start), count, reason));
+                throw e;
+            }
+            context.telemetry().modelFinished(span, answer);
+            context.trace(scope, TraceEvent.modelFinished(id, round, at, elapsed(start), count,
+                    answer.finishReason(), answer.calls().size(), answer.content()).withUsage(answer.usage()));
+            if (answer.reasoningContent() != null && !answer.reasoningContent().isBlank()) {
+                context.trace(scope, TraceEvent.reasoning("reasoning-" + id, round, at, answer.reasoningContent()));
+            }
+            if (!answer.content().isBlank()) {
+                context.trace(scope, TraceEvent.assistant("assistant-" + id, round, at, answer.content()));
+            }
+            return answer;
         }
-        context.trace(scope, TraceEvent.modelFinished(id, round, at, elapsed(start), count,
-                answer.finishReason(), answer.calls().size(), answer.content()).withUsage(answer.usage()));
-        if (answer.reasoningContent() != null && !answer.reasoningContent().isBlank()) {
-            context.trace(scope, TraceEvent.reasoning("reasoning-" + id, round, at, answer.reasoningContent()));
-        }
-        if (!answer.content().isBlank()) {
-            context.trace(scope, TraceEvent.assistant("assistant-" + id, round, at, answer.content()));
-        }
-        return answer;
     }
 
     static void validate(AssistantTurn answer) throws IOException {

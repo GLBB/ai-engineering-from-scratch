@@ -10,14 +10,17 @@
 4. [动手运行和调试](04-run-and-debug.md)：启动项目、查看轨迹、设置断点和运行测试。
 5. [工具调用上限、终止条件和对话记录](05-tool-calls-and-transcripts.md)：运行离线实验，对比四种 API 的调用与结果格式。
 6. [用同一段对话理解三种协议](06-three-protocols-by-example.md)：用固定颜色标出所有内容来源，对照完整请求、响应、角色和思考字段。
+7. [通过 Trace 理解项目](07-reading-agent-traces.md)：对照三种模式的示意树与已采集的真实 Trace，理解天气请求、调用计数与结束原因。
 
 已经熟悉 Agent 基本概念的话，可以直接从 [ReActRunner.java](../src/main/java/dev/learning/agent/core/react/ReActRunner.java) 开始读，再根据调用关系返回文档。
 
 ## 开发设计与研究
 
-[三模式技术方案](design/agent-execution-technical-design.md) 是开发时的统一依据，确定接口、算法、对话模式锁定、异常、文件改造和测试；[研究记录](design/agent-execution-research.md)只保存来源与事实依据。上述 01–06 篇解释当前已实现代码，复习总结见 [review-notes](../../review-notes/README.md)。三模式已实现，具体测试和真实接口记录见研究记录。
+[三模式技术方案](design/agent-execution-technical-design.md) 是开发时的统一依据，确定接口、算法、逐轮模式选择与共享记忆、异常、文件改造和测试；[研究记录](design/agent-execution-research.md)只保存来源与事实依据。上述 01–07 篇解释当前已实现代码，复习总结见 [review-notes](../../review-notes/README.md)。三模式已实现，具体测试和真实接口记录见研究记录。
 
 [天气能力实现方案](design/weather-capability-implementation-plan.md) 定义当前天气与逐日预报两个工具，说明城市名如何转换为 API 经纬度、同名地点如何确认，以及三模式的接入与验收；天气工具及澄清流程已接入，实际验证范围记录在方案末尾。
+
+[OpenTelemetry Trace 接入技术方案](design/observability-trace-implementation-plan.md) 记录本机 Langfuse 检查、官方 GenAI 规范快照、span 设计、异步 Context、字段映射、内容边界与实施验收；代码已接入独立 Langfuse 项目，真实样例及回读结果见方案第 11 节。
 
 ## 先记住三个概念
 

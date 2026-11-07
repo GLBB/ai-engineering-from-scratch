@@ -684,3 +684,6 @@ textarea::placeholder {
 @media (max-width: 600px) { .mode-bar { align-items: flex-start; } #mode-hint { flex-basis: 100%; } }
 
 .tool-source { display: block; width: fit-content; margin-top: 8px; color: #167a68; font-size: 12px; }
+.trace-reference { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0.5rem 0; font-size: 0.8rem; }
+.trace-reference code { overflow-wrap: anywhere; color: #64748b; }
+.trace-reference a { color: #245cba; }

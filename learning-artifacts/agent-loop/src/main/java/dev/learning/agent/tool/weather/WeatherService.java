@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import dev.learning.agent.tool.ToolSource;
+import dev.learning.agent.core.runtime.ExternalObserver;
 
 /** Orchestrates location resolution and facts; it never accesses an agent RunContext. */
 public final class WeatherService {
@@ -24,7 +25,10 @@ public final class WeatherService {
     private final CityResolver resolver;
     private final Clock clock;
     public WeatherService(WeatherProvider provider, Clock clock) {
-        this.provider = provider; resolver = new CityResolver(provider); this.clock = clock;
+        this(provider, clock, ExternalObserver.NOOP);
+    }
+    public WeatherService(WeatherProvider provider, Clock clock, ExternalObserver observer) {
+        this.provider = provider; resolver = new CityResolver(provider, observer); this.clock = clock;
     }
     public List<ToolSource> sources() { return provider.sources(); }
 

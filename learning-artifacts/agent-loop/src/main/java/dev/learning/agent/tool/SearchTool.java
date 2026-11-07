@@ -2,6 +2,7 @@ package dev.learning.agent.tool;
 
 import dev.learning.agent.core.runtime.RunContext;
 import dev.learning.agent.core.runtime.RunScope;
+import dev.learning.agent.core.runtime.TraceSpan;
 import dev.learning.agent.model.ToolSpec.FunctionSpec;
 import dev.learning.agent.model.ToolSpec.ParameterSchema;
 import dev.learning.agent.model.ToolSpec;
@@ -59,18 +60,26 @@ public final class SearchTool implements AgentTool {
                 .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
                 .build();
         long start = System.nanoTime();
-        var future = http.sendAsync(request, HttpResponse.BodyHandlers.ofString());
-        AutoCloseable cancellation = context == null ? () -> {} : context.control().onCancel(() -> future.cancel(true));
-        HttpResponse<String> response;
-        try {
-            long timeout = context == null ? 30_000 : Math.min(30_000, Math.max(1, context.control().remaining().toMillis()));
-            response = future.get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS);
-        } catch (Exception e) {
-            future.cancel(true);
-            throw e;
-        } finally { cancellation.close(); }
-        LOG.info("Exa HTTP status={}; elapsed={} ms", response.statusCode(),
-                (System.nanoTime() - start) / 1_000_000);
+        if (context != null) context.telemetry().toolHttpRequests(1);
+        try (TraceSpan span = context == null ? TraceSpan.NOOP : context.telemetry().external().http("POST", request.uri())) {
+            var future = http.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+            AutoCloseable cancellation = context == null ? () -> {} : context.control().onCancel(() -> future.cancel(true));
+            HttpResponse<String> response;
+            try {
+                long timeout = context == null ? 30_000 : Math.min(30_000, Math.max(1, context.control().remaining().toMillis()));
+                response = future.get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Exception e) {
+                span.fail(e);
+                future.cancel(true);
+                throw e;
+            } finally { cancellation.close(); }
+            span.attribute("http.response.status_code", response.statusCode());
+            if (response.statusCode() >= 400) span.error("HTTP_" + response.statusCode());
+            LOG.info("Exa HTTP status={}; elapsed={} ms", response.statusCode(), (System.nanoTime() - start) / 1_000_000);
+            return response(response);
+        }
+    }
+    private ToolResult response(HttpResponse<String> response) throws IOException {
         if (response.statusCode() != 200) throw new IOException("Exa returned HTTP " + response.statusCode());
         SearchResponse found = json.readValue(response.body(), SearchResponse.class);
         LOG.info("Exa results={}", found.results() == null ? 0 : found.results().size());

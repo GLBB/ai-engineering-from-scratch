@@ -26,12 +26,18 @@ public final class ModelJson {
         AssistantTurn answer = call(prompt, original, settings, scope, context, false);
         try { return parser.parse(answer.content()); }
         catch (IOException | IllegalArgumentException e) {
-            if (!context.budget().claimFormatRepair()) throw new PlanValidationException(e.getMessage());
+            context.telemetry().event("agent_loop.validation.failed", "STRUCTURED_OUTPUT");
+            if (!context.budget().claimFormatRepair()) {
+                context.telemetry().event("agent_loop.budget.exhausted", "FORMAT_REPAIR");
+                throw new PlanValidationException(e.getMessage());
+            }
             context.emit("phase", new Phase("REPAIR", "running", scope.stepId(), scope.revision()));
             RepairInput repair = new RepairInput(prompt, original, answer.content(), e.getMessage());
-            AssistantTurn fixed = call(Prompts.read("json-repair"), StrictJson.write(repair), settings,
-                    new RunScope("REPAIR", scope.stepId(), scope.revision()), context, false);
-            return parser.parse(fixed.content());
+            RunScope repairScope = new RunScope("REPAIR", scope.stepId(), scope.revision());
+            return context.telemetry().observe(repairScope, () -> {
+                AssistantTurn fixed = call(Prompts.read("json-repair"), StrictJson.write(repair), settings, repairScope, context, false);
+                return parser.parse(fixed.content());
+            });
         }
     }
 

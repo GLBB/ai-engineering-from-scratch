@@ -21,7 +21,7 @@
       <button type="button" data-view="conversation" aria-selected="true">对话</button>
       <button type="button" data-view="trace" aria-selected="false">轨迹</button>
     </nav>
-    <section class="mode-bar" aria-label="对话执行模式">
+    <section class="mode-bar" aria-label="本轮执行模式">
       <div class="mode-setting">
         <label id="mode-label" for="mode-select">执行模式</label>
         <select id="mode-select">
@@ -30,7 +30,7 @@
           <option value="PLAN_EXECUTE">Plan-and-Execute</option>
         </select>
         <strong id="current-mode" hidden></strong>
-        <span id="mode-hint">首条消息发送后固定，可新建对话切换。</span>
+        <span id="mode-hint">每条消息可选择模式，保留当前对话上下文。</span>
       </div>
       <button id="new-conversation" type="button" disabled>新建对话</button>
     </section>

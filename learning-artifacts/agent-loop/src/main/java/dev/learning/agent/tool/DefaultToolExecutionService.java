@@ -6,6 +6,7 @@ import dev.learning.agent.core.runtime.Evidence;
 import dev.learning.agent.core.runtime.RunContext;
 import dev.learning.agent.core.runtime.RunScope;
 import dev.learning.agent.core.runtime.TraceEvent;
+import dev.learning.agent.core.runtime.TraceSpan;
 import dev.learning.agent.model.ToolCall;
 import dev.learning.agent.support.json.StrictJson;
 
@@ -19,60 +20,66 @@ public final class DefaultToolExecutionService implements ToolExecutionService {
     public Set<String> availableTools() { return registry.names(); }
 
     public Evidence invoke(ToolInput input, String id, Set<String> allowed, RunScope scope, RunContext context) {
-        return attempt(input.toolName(), StrictJson.write(input), id, allowed, scope, context);
+        return attempt(input.toolName(), StrictJson.write(input), id, null, allowed, scope, context);
     }
 
     public Evidence invokeNative(ToolCall call, String id, Set<String> allowed, RunScope scope, RunContext context) {
-        return attempt(call.function().name(), call.function().arguments(), id, allowed, scope, context);
+        return attempt(call.function().name(), call.function().arguments(), id, call.id(), allowed, scope, context);
     }
 
-    private Evidence attempt(String name, String arguments, String id, Set<String> allowed,
+    private Evidence attempt(String name, String arguments, String id, String nativeId, Set<String> allowed,
                              RunScope scope, RunContext context) {
         try { context.budget().claimToolAttempt(); }
-        catch (BudgetExceededException e) { return skipped(name, arguments, id, scope, context, e.getMessage()); }
-        String traceId = "tool-" + context.requestId() + "-" + context.budget().snapshot().toolAttempts();
-        int round = context.budget().snapshot().modelCalls();
-        long at = System.currentTimeMillis();
-        long started = System.nanoTime();
-        context.trace(scope, TraceEvent.toolStarted(traceId, round, at, name, arguments));
-        context.emit("tool", "tool: " + name);
-        ToolResult result;
-        boolean dispatched = false;
-        try {
-            context.control().check();
-            if (!allowed.contains(name) || registry.find(name) == null) {
-                result = failure(ToolStatus.ERROR, "UNKNOWN_TOOL", "unknown tool " + name, false);
-            } else {
-                ToolInput input = registry.decode(name, arguments);
-                if (context.mode() == AgentMode.PLAN_EXECUTE && input instanceof BashInput
-                        && context.evidence().snapshot().stream().anyMatch(item -> name.equals(item.tool())
-                        && StrictJson.write(input).equals(item.boundArgumentsJson()))) {
-                    result = failure(ToolStatus.DENIED, "DUPLICATE_BASH", "duplicate Bash request blocked in this run", false);
-                } else result = cachedCalculator(input, context);
-                if (result == null) {
-                    dispatched = true;
-                    result = registry.find(name).execute(input, scope, context);
-                }
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool interrupted", dispatched);
-        } catch (java.util.concurrent.TimeoutException e) {
-            result = failure(ToolStatus.TIMEOUT, "TOOL_TIMEOUT", "tool timed out", dispatched);
-        } catch (java.util.concurrent.CancellationException e) {
-            result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool cancelled", dispatched);
-        } catch (java.io.IOException | IllegalArgumentException | ArithmeticException e) {
-            result = failure(ToolStatus.ERROR, dispatched ? "TOOL_FAILED" : "INVALID_ARGUMENTS", "invalid tool arguments or operation: " + e.getMessage(), dispatched);
-        } catch (Exception e) {
-            result = failure(ToolStatus.ERROR, "TOOL_FAILED", "tool failed", dispatched);
+        catch (BudgetExceededException e) {
+            context.telemetry().event("agent_loop.budget.exhausted", "TOOL");
+            return skipped(name, arguments, id, scope, context, e.getMessage());
         }
-        context.budget().recordToolResult(result);
-        Evidence evidence = save(name, arguments, id, scope, result, (System.nanoTime() - started) / 1_000_000, context);
-        String status = result.status() == ToolStatus.SUCCESS ? "complete" : result.status().name().toLowerCase(java.util.Locale.ROOT);
-        TraceEvent trace = new TraceEvent(traceId, "tool", status, round, at,
-                evidence.durationMs(), name, arguments, evidence.result().content());
-        context.trace(scope, trace);
-        return evidence;
+        try (TraceSpan span = context.telemetry().tool(name, arguments, id, nativeId, scope)) {
+            String traceId = "tool-" + context.requestId() + "-" + context.budget().snapshot().toolAttempts();
+            int round = context.budget().snapshot().modelCalls();
+            long at = System.currentTimeMillis();
+            long started = System.nanoTime();
+            context.trace(scope, TraceEvent.toolStarted(traceId, round, at, name, arguments));
+            context.emit("tool", "tool: " + name);
+            ToolResult result;
+            boolean dispatched = false;
+            try {
+                context.control().check();
+                if (!allowed.contains(name) || registry.find(name) == null) {
+                    result = failure(ToolStatus.ERROR, "UNKNOWN_TOOL", "unknown tool " + name, false);
+                } else {
+                    ToolInput input = registry.decode(name, arguments);
+                    if (context.mode() == AgentMode.PLAN_EXECUTE && input instanceof BashInput
+                            && context.evidence().snapshot().stream().anyMatch(item -> name.equals(item.tool())
+                            && StrictJson.write(input).equals(item.boundArgumentsJson()))) {
+                        result = failure(ToolStatus.DENIED, "DUPLICATE_BASH", "duplicate Bash request blocked in this run", false);
+                    } else result = cachedCalculator(input, context);
+                    if (result == null) {
+                        dispatched = true;
+                        result = registry.find(name).execute(input, scope, context);
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool interrupted", dispatched);
+            } catch (java.util.concurrent.TimeoutException e) {
+                result = failure(ToolStatus.TIMEOUT, "TOOL_TIMEOUT", "tool timed out", dispatched);
+            } catch (java.util.concurrent.CancellationException e) {
+                result = failure(ToolStatus.CANCELLED, "CANCELLED", "tool cancelled", dispatched);
+            } catch (java.io.IOException | IllegalArgumentException | ArithmeticException e) {
+                result = failure(ToolStatus.ERROR, dispatched ? "TOOL_FAILED" : "INVALID_ARGUMENTS", "invalid tool arguments or operation: " + e.getMessage(), dispatched);
+            } catch (Exception e) {
+                result = failure(ToolStatus.ERROR, "TOOL_FAILED", "tool failed", dispatched);
+            }
+            context.budget().recordToolResult(result);
+            Evidence evidence = save(name, arguments, id, scope, result, (System.nanoTime() - started) / 1_000_000, context);
+            context.telemetry().toolFinished(span, evidence.result());
+            String status = result.status() == ToolStatus.SUCCESS ? "complete" : result.status().name().toLowerCase(java.util.Locale.ROOT);
+            TraceEvent trace = new TraceEvent(traceId, "tool", status, round, at,
+                    evidence.durationMs(), name, arguments, evidence.result().content());
+            context.trace(scope, trace);
+            return evidence;
+        }
     }
 
     private ToolResult cachedCalculator(ToolInput input, RunContext context) {

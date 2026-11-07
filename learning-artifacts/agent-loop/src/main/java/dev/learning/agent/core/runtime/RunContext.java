@@ -18,6 +18,7 @@ public interface RunContext {
     ModelGateway model();
     ToolExecutionService tools();
     ApprovalGateway approvals();
+    default RunTelemetry telemetry() { return RunTelemetry.NOOP; }
     default boolean needsInput() {
         return evidence().snapshot().stream().anyMatch(item -> item.result().status() == ToolStatus.NEEDS_INPUT);
     }
@@ -29,5 +30,8 @@ public interface RunContext {
     default void trace(RunScope scope, TraceEvent trace) {
         emit("trace", trace.scoped(requestId().toString(), mode(), scope));
     }
-    default void emit(String type, Object data) { events().emit(new RuntimeEvent(type, data)); }
+    default void emit(String type, Object data) {
+        telemetry().runtimeEvent(type, data);
+        events().emit(new RuntimeEvent(type, data));
+    }
 }

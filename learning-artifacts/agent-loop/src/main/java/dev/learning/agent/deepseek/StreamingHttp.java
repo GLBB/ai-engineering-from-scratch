@@ -1,6 +1,8 @@
 package dev.learning.agent.deepseek;
 
 import dev.learning.agent.core.runtime.RunControl;
+import dev.learning.agent.core.runtime.ExternalObserver;
+import dev.learning.agent.core.runtime.TraceSpan;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.*;
@@ -21,59 +23,89 @@ final class StreamingHttp {
     private final ObjectMapper json;
     private final String key;
     private final URI endpoint;
+    private final ExternalObserver observer;
 
     StreamingHttp(ObjectMapper json, String key, String baseUrl, String path) {
+        this(json, key, baseUrl, path, ExternalObserver.NOOP);
+    }
+    StreamingHttp(ObjectMapper json, String key, String baseUrl, String path, ExternalObserver observer) {
         if (key == null || key.isBlank()) throw new IllegalArgumentException("DeepSeek API key is required");
         if (baseUrl == null || !"https".equals(URI.create(baseUrl).getScheme())) {
             throw new IllegalArgumentException("DeepSeek base URL must use HTTPS");
         }
         this.json = json;
         this.key = key;
+        this.observer = observer;
         endpoint = URI.create(baseUrl.replaceAll("/+$", "") + path);
     }
 
     InputStream send(Object body, RunControl control) throws IOException, InterruptedException {
         control.check();
-        long callNanos = Math.min(Duration.ofSeconds(120).toNanos(), control.remaining().toNanos());
-        long started = System.nanoTime();
-        HttpRequest request = HttpRequest.newBuilder(endpoint).timeout(Duration.ofNanos(callNanos))
-                .header("Authorization", "Bearer " + key).header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream")
-                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build();
-        var future = http.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
-        AutoCloseable requestCancellation = control.onCancel(() -> future.cancel(true));
-        HttpResponse<InputStream> response;
+        TraceSpan span = observer.http("POST", endpoint);
         try {
-            response = future.get(callNanos, TimeUnit.NANOSECONDS);
-        } catch (InterruptedException e) {
-            future.cancel(true);
-            throw e;
-        } catch (ExecutionException e) {
-            throw new IOException("model HTTP request failed", e.getCause());
-        } catch (TimeoutException e) {
-            future.cancel(true);
-            throw new IOException("model request timed out", e);
-        } catch (CancellationException e) {
-            control.check();
-            throw new IOException("model request cancelled", e);
-        } finally {
-            unregister(requestCancellation);
-        }
-        if (response.statusCode() != 200) {
-            response.body().close();
-            throw new IOException("DeepSeek returned HTTP " + response.statusCode());
-        }
-        InputStream input = response.body();
-        AutoCloseable cancellation = control.onCancel(() -> closeQuietly(input));
-        var deadline = TIMER.schedule(() -> closeQuietly(input),
-                Math.max(0, callNanos - (System.nanoTime() - started)), TimeUnit.NANOSECONDS);
-        return new FilterInputStream(input) {
-            public void close() throws IOException {
-                deadline.cancel(false);
-                unregister(cancellation);
-                super.close();
+            long callNanos = Math.min(Duration.ofSeconds(120).toNanos(), control.remaining().toNanos());
+            long started = System.nanoTime();
+            HttpRequest request = HttpRequest.newBuilder(endpoint).timeout(Duration.ofNanos(callNanos))
+                    .header("Authorization", "Bearer " + key).header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build();
+            var future = http.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
+            AutoCloseable requestCancellation = control.onCancel(() -> future.cancel(true));
+            HttpResponse<InputStream> response;
+            try {
+                response = future.get(callNanos, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                future.cancel(true);
+                throw e;
+            } catch (ExecutionException e) {
+                throw new IOException("model HTTP request failed", e.getCause());
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                throw new IOException("model request timed out", e);
+            } catch (CancellationException e) {
+                control.check();
+                throw new IOException("model request cancelled", e);
+            } finally {
+                unregister(requestCancellation);
             }
-        };
+            if (response.statusCode() != 200) {
+                span.attribute("http.response.status_code", response.statusCode());
+                span.error("HTTP_" + response.statusCode());
+                response.body().close();
+                throw new IOException("DeepSeek returned HTTP " + response.statusCode());
+            }
+            InputStream input = response.body();
+            span.attribute("http.response.status_code", response.statusCode());
+            AutoCloseable cancellation = control.onCancel(() -> closeQuietly(input));
+            var timedOut = new java.util.concurrent.atomic.AtomicBoolean();
+            var deadline = TIMER.schedule(() -> { timedOut.set(true); closeQuietly(input); },
+                    Math.max(0, callNanos - (System.nanoTime() - started)), TimeUnit.NANOSECONDS);
+            return new FilterInputStream(input) {
+                public int read() throws IOException {
+                    try { return super.read(); } catch (IOException error) { readFailed(error); throw error; }
+                }
+                public int read(byte[] bytes, int offset, int length) throws IOException {
+                    try { return super.read(bytes, offset, length); } catch (IOException error) { readFailed(error); throw error; }
+                }
+                private void readFailed(IOException error) {
+                    if (control.cancelled()) span.attribute("agent_loop.cancelled", true);
+                    else if (timedOut.get()) span.error("MODEL_HTTP_TIMEOUT");
+                    else span.fail(error);
+                }
+                public void close() throws IOException {
+                    deadline.cancel(false);
+                    unregister(cancellation);
+                    try { super.close(); }
+                    finally {
+                        if (timedOut.get()) span.error("MODEL_HTTP_TIMEOUT");
+                        if (control.cancelled()) span.attribute("agent_loop.cancelled", true);
+                        span.close();
+                    }
+                }
+            };
+        } catch (IOException | InterruptedException | RuntimeException error) {
+            span.fail(error); span.close(); throw error;
+        }
     }
 
     private static void closeQuietly(InputStream input) {

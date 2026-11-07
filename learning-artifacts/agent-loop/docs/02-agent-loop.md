@@ -6,7 +6,7 @@ ReAct 的关键是：模型根据当前历史选择工具，程序执行工具�
 
 ## 浏览器到 Session
 
-页面先通过 `GET /api/session` 创建对话。新对话模式为空，在对话框上方选择模式；首条 `POST /api/chat` 通过输入校验后，`Session.accept` 原子绑定模式和 Runner，创建 RunLease。当前 Session 已有运行时返回 409；已有模式与请求不同也返回 409。输入错误不会绑定模式。
+页面先通过 `GET /api/session` 创建对话。在对话框上方为本条消息选择模式；`POST /api/chat` 通过输入校验后，`Session.accept` 原子选择 Runner 并创建 RunLease，本轮模式随之确定。当前 Session 已有运行时返回 409；清理完成后下一条消息可切换模式。输入错误不会改变最近一次接受的模式。
 
 RunLease 持有本轮 requestId、请求快照、RunContext、事件通道和工具确认。异步流真正开始后进入 RUNNING，发出 run_started，再调用 Runner。结束时清理资源并释放所属 Session。若连接在异步任务启动前就结束，ACCEPTED 状态也能直接取消，不依赖尚未进入的执行方法的 finally。
 
@@ -49,7 +49,7 @@ sequenceDiagram
 
 这是原生 tool 消息里的字符串内容。`executed` 与 `status` 是不同问题：Bash 已执行但输出未获分享时，状态为 DENIED、executed 为 true，内容只保留拒绝说明；成功缓存复用则 executed 为 false。
 
-ReAct 保留完整历史，三个协议客户端负责转换，思考内容与 Anthropic blocks 也保留在完整 AssistantTurn 中。P&E 的局部步骤历史不进入会话历史；ReWOO/P&E 的跨轮记忆只保留有限的已完成问答对。
+连续使用 ReAct 时保留完整历史，三个协议客户端负责转换，思考内容与 Anthropic blocks 也保留在完整 AssistantTurn 中。Session 另存有限的共享问答、结果状态与工具尝试摘要。切换模式时用这个快照创建新 Runner；切回 ReAct 也能看到中间其他模式的回答，不携带旧模式的原生 tool 消息。P&E 局部步骤历史、计划、EvidenceStore 与确认均不跨模式迁移。
 
 ## 和其他两种模式的关系
 

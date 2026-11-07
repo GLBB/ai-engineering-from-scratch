@@ -1,6 +1,8 @@
 package dev.learning.agent.deepseek;
 
 import dev.learning.agent.core.runtime.RunControl;
+import dev.learning.agent.core.runtime.ExternalObserver;
+import dev.learning.agent.model.ModelStreamObserver;
 import dev.learning.agent.deepseek.model.ProviderUsage;
 import dev.learning.agent.model.AssistantTurn;
 import dev.learning.agent.model.ChatMessage;
@@ -29,8 +31,11 @@ public final class ResponsesClient implements ChatModel {
     private final StreamingHttp http;
 
     public ResponsesClient(ObjectMapper json, String key, String baseUrl) {
+        this(json, key, baseUrl, ExternalObserver.NOOP);
+    }
+    public ResponsesClient(ObjectMapper json, String key, String baseUrl, ExternalObserver observer) {
         this.json = json.copy().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-        this.http = new StreamingHttp(this.json, key, baseUrl, "/responses");
+        this.http = new StreamingHttp(this.json, key, baseUrl, "/responses", observer);
     }
 
     @Override
@@ -39,8 +44,12 @@ public final class ResponsesClient implements ChatModel {
     @Override
     public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control)
             throws IOException, InterruptedException {
+        return stream(modelRequest, onText, control, ModelStreamObserver.NOOP);
+    }
+    public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control, ModelStreamObserver observer)
+            throws IOException, InterruptedException {
         try (InputStream input = http.send(request(modelRequest), control)) {
-            return read(input, onText);
+            return read(input, onText, observer);
         }
     }
 
@@ -84,13 +93,21 @@ public final class ResponsesClient implements ChatModel {
     }
 
     AssistantTurn read(InputStream input, Consumer<String> onText) throws IOException {
+        return read(input, onText, ModelStreamObserver.NOOP);
+    }
+    AssistantTurn read(InputStream input, Consumer<String> onText, ModelStreamObserver observer) throws IOException {
         Response[] completed = new Response[1];
         int[] streamedCharacters = {0};
         StreamingHttp.readEvents(input, data -> {
             EventType event = json.readValue(data, EventType.class);
             if (event.type() != null && event.type().endsWith(".delta")) {
                 Delta delta = json.readValue(data, Delta.class);
-                if (delta.delta() != null) streamedCharacters[0] += delta.delta().length();
+                if (delta.delta() != null) {
+                    streamedCharacters[0] += delta.delta().length();
+                    if (!delta.delta().isEmpty() && List.of("response.output_text.delta", "response.reasoning_text.delta",
+                            "response.function_call_arguments.delta").contains(event.type()))
+                        observer.chunk("response.output_text.delta".equals(event.type()));
+                }
                 if (streamedCharacters[0] > 16_000) throw new IOException("model output too large");
             }
             if ("response.output_text.delta".equals(event.type())) {
@@ -98,6 +115,7 @@ public final class ResponsesClient implements ChatModel {
                 if (delta.delta() != null) onText.accept(delta.delta());
             } else if ("response.completed".equals(event.type())) {
                 completed[0] = json.readValue(data, Completed.class).response();
+                if (completed[0] != null) observer.usage(ProviderUsage.toTokenUsage(completed[0].usage()), true);
             } else if ("response.failed".equals(event.type()) || "response.incomplete".equals(event.type())) {
                 throw new IOException("DeepSeek Responses stream ended with " + event.type());
             } else if ("error".equals(event.type()) || event.type() == null) {
@@ -125,7 +143,7 @@ public final class ResponsesClient implements ChatModel {
             }
         }
         return new AssistantTurn(text.toString(), List.copyOf(calls), calls.isEmpty() ? "stop" : "tool_calls",
-                reasoning.isEmpty() ? null : reasoning.toString(), null, ProviderUsage.toTokenUsage(completed[0].usage()));
+                reasoning.isEmpty() ? null : reasoning.toString(), null, ProviderUsage.toTokenUsage(completed[0].usage()), new AssistantTurn.ResponseMetadata(completed[0].id(), completed[0].model()));
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -140,7 +158,7 @@ public final class ResponsesClient implements ChatModel {
     record EventType(String type) {}
     record Delta(String type, String delta) {}
     record Completed(String type, Response response) {}
-    record Response(List<Output> output, ProviderUsage usage) {}
+    record Response(List<Output> output, ProviderUsage usage, String id, String model) {}
     record Output(String type, List<Content> content, @JsonProperty("call_id") String callId,
                   String name, String arguments) {}
 }

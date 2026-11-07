@@ -2,6 +2,8 @@ package dev.learning.agent.tool.weather;
 
 import dev.learning.agent.tool.weather.WeatherModels.GeoLocation;
 import dev.learning.agent.tool.weather.WeatherModels.LocationQuery;
+import dev.learning.agent.core.runtime.ExternalObserver;
+import dev.learning.agent.core.runtime.TraceSpan;
 import java.io.IOException;
 import java.text.Normalizer;
 import java.util.LinkedHashMap;
@@ -17,11 +19,20 @@ public final class CityResolver {
         public Ambiguous { candidates = List.copyOf(candidates); }
     }
     private final WeatherProvider provider;
-    public CityResolver(WeatherProvider provider) { this.provider = provider; }
+    private final ExternalObserver observer;
+    public CityResolver(WeatherProvider provider) { this(provider, ExternalObserver.NOOP); }
+    public CityResolver(WeatherProvider provider, ExternalObserver observer) { this.provider = provider; this.observer = observer; }
     public Resolution resolve(LocationQuery query, WeatherCall call) throws IOException, InterruptedException {
+        try (TraceSpan span = observer.operation("agent_loop.weather.resolve")) {
+            try { return resolve(query, call, span); }
+            catch (IOException | InterruptedException | RuntimeException error) { span.fail(error); throw error; }
+        }
+    }
+    private Resolution resolve(LocationQuery query, WeatherCall call, TraceSpan span) throws IOException, InterruptedException {
         String city = query.city();
         List<GeoLocation> found = provider.search(query, city, call);
         if (found.isEmpty() && "CN".equals(query.countryCode()) && city.endsWith("市") && city.length() > 1) {
+            span.attribute("agent_loop.weather.fallback_used", true);
             city = city.substring(0, city.length() - 1);
             found = provider.search(query, city, call);
         }
@@ -31,9 +42,16 @@ public final class CityResolver {
             if (query.admin1() != null && !same(query.admin1(), place.admin1())) continue;
             unique.putIfAbsent(place.id(), place);
         }
-        if (unique.isEmpty()) return new NotFound(query.city());
-        if (unique.size() == 1 && same(city, unique.values().iterator().next().name()))
+        span.attribute("agent_loop.weather.candidate_count", unique.size());
+        if (unique.isEmpty()) {
+            span.attribute("agent_loop.weather.resolution", "NOT_FOUND");
+            return new NotFound(query.city());
+        }
+        if (unique.size() == 1 && same(city, unique.values().iterator().next().name())) {
+            span.attribute("agent_loop.weather.resolution", "RESOLVED");
             return new Resolved(unique.values().iterator().next(), city);
+        }
+        span.attribute("agent_loop.weather.resolution", "AMBIGUOUS");
         return new Ambiguous(unique.values().stream().limit(5).toList());
     }
     private static boolean same(String first, String second) {

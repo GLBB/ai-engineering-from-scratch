@@ -45,14 +45,14 @@ class ChatControllerTest {
         assertTrue(output.contains("\"type\":\"run_started\""));
         assertTrue(output.indexOf("\"type\":\"run_result\"") < output.indexOf("\"type\":\"done\""));
         for (String line : output.split("\n")) assertFalse(new ObjectMapper().readTree(line).path("requestId").asText().isBlank());
-        assertFalse(session.status().running()); assertTrue(session.status().modeLocked());
+        assertFalse(session.status().running()); assertEquals(AgentMode.REACT, session.status().mode());
     }
-    @Test void invalidRequestsDoNotBindModeAndHaveJsonErrors() throws Exception {
+    @Test void invalidRequestsDoNotChangeModeAndHaveJsonErrors() throws Exception {
         AgentSessions.Session session = sessions.create();
         for (String body : List.of("{\"prompt\":\"\"}", "{\"prompt\":\"hi\",\"mode\":\"UNKNOWN\"}", "{\"prompt\":\"hi\",\"model\":\"unknown\"}")) {
             mvc.perform(chat(session.id(), body)).andExpect(status().isBadRequest())
                     .andExpect(content().string(containsString("INVALID_REQUEST")));
-            assertFalse(session.status().modeLocked());
+            assertNull(session.status().mode());
         }
     }
     @Test void statusDoesNotCreateMissingConversation() throws Exception {
@@ -60,16 +60,20 @@ class ChatControllerTest {
                 .andExpect(status().isUnauthorized()).andExpect(content().string(containsString("SESSION_NOT_FOUND")));
         AgentSessions.Session session = sessions.create();
         mvc.perform(local(get("/api/session/status")).header("X-Agent-Session", session.id()))
-                .andExpect(status().isOk()).andExpect(content().string(containsString("\"modeLocked\":false")));
+                .andExpect(status().isOk()).andExpect(content().string(containsString("\"running\":false")));
     }
-    @Test void concurrentAndModeConflictHaveSeparateCodes() throws Exception {
+    @Test void concurrentRequestIsRejectedButModeCanChangeAfterCleanup() throws Exception {
         AgentSessions.Session session = sessions.create();
         RunLease lease = session.accept("hi", ModelSettings.defaults(), AgentMode.REWOO);
-        mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REWOO\"}"))
+        mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REACT\"}"))
                 .andExpect(status().isConflict()).andExpect(content().string(containsString("RUN_IN_PROGRESS")));
         lease.cancel("test accepted cancellation");
-        mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REACT\"}"))
-                .andExpect(status().isConflict()).andExpect(content().string(containsString("MODE_LOCKED")));
+        MvcResult started = mvc.perform(chat(session.id(), "{\"prompt\":\"hi\",\"mode\":\"REACT\",\"model\":\"deepseek-v4-pro\",\"reasoningLevel\":\"max\"}"))
+                .andExpect(request().asyncStarted()).andReturn();
+        String output = mvc.perform(asyncDispatch(started)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertTrue(output.contains("\"mode\":\"REACT\""));
+        assertFalse(output.contains("modeLocked"));
+        assertFalse(session.status().running());
     }
     @Test void needsInputEndsNormallyWithoutAnErrorEvent() throws Exception {
         var mockedSessions = org.mockito.Mockito.mock(AgentSessions.class);

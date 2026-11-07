@@ -2,6 +2,7 @@ package dev.learning.agent.tool;
 
 import dev.learning.agent.core.runtime.RunContext;
 import dev.learning.agent.core.runtime.RunScope;
+import dev.learning.agent.core.runtime.TraceSpan;
 import dev.learning.agent.model.ToolSpec.FunctionSpec;
 import dev.learning.agent.model.ToolSpec.ParameterSchema;
 import dev.learning.agent.model.ToolSpec;
@@ -58,25 +59,39 @@ public final class BashTool implements AgentTool {
         builder.environment().remove("DEEPSEEK_API_KEY");
         builder.environment().remove("EXA_AI_KEY");
         builder.environment().remove("EXA_API_KEY");
+        builder.environment().remove("LANGFUSE_PUBLIC_KEY");
+        builder.environment().remove("LANGFUSE_SECRET_KEY");
+        builder.environment().remove("OTEL_EXPORTER_OTLP_HEADERS");
+        builder.environment().remove("OTEL_EXPORTER_OTLP_TRACES_HEADERS");
         if (context != null) context.control().check();
-        Process process = builder.start();
-        AutoCloseable cancellation = context == null ? () -> {} : context.control().onCancel(() -> stop(process));
+        TraceSpan processSpan = context == null ? TraceSpan.NOOP : context.telemetry().external().operation("agent_loop.bash.process");
         CapturedOutput output = new CapturedOutput();
-        Thread reader = new Thread(() -> output.drain(process), "bash-output-reader");
-        reader.setDaemon(true);
-        reader.start();
-        long start = System.nanoTime();
+        Process process;
         boolean finished;
+        long start = System.nanoTime();
         try {
-            long waitMs = context == null ? 15_000 : Math.min(15_000, Math.max(1, context.control().remaining().toMillis()));
-            finished = process.waitFor(waitMs, TimeUnit.MILLISECONDS);
-            if (!finished) stop(process);
-            reader.join(2_000);
-            if (context != null) context.control().check();
-        } finally {
-            cancellation.close();
-            if (process.isAlive()) stop(process);
-        }
+            process = builder.start();
+            processSpan.attribute("process.executable.name", "bash");
+            AutoCloseable cancellation = context == null ? () -> {} : context.control().onCancel(() -> stop(process));
+            Thread reader = new Thread(() -> output.drain(process), "bash-output-reader");
+            reader.setDaemon(true);
+            reader.start();
+            try {
+                long waitMs = context == null ? 15_000 : Math.min(15_000, Math.max(1, context.control().remaining().toMillis()));
+                finished = process.waitFor(waitMs, TimeUnit.MILLISECONDS);
+                if (!finished) stop(process);
+                reader.join(2_000);
+                if (context != null) context.control().check();
+            } finally {
+                cancellation.close();
+                if (process.isAlive()) stop(process);
+            }
+            if (finished) {
+                processSpan.attribute("process.exit.code", process.exitValue());
+                if (process.exitValue() != 0) processSpan.error("BASH_EXIT_NONZERO");
+            } else processSpan.error("BASH_TIMEOUT");
+        } catch (Exception error) { processSpan.fail(error); throw error; }
+        finally { processSpan.close(); }
         String result = "exit=" + (finished ? process.exitValue() : "timeout") + "\n" + output.text();
         LOG.info("Bash process finished; status={}; elapsed={} ms; output chars={}",
                 finished ? process.exitValue() : "timeout", (System.nanoTime() - start) / 1_000_000,

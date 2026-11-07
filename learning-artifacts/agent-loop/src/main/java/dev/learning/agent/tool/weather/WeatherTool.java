@@ -44,7 +44,10 @@ abstract class WeatherTool implements AgentTool {
         } catch (InterruptedException cancelled) {
             Thread.currentThread().interrupt();
             return result(ToolStatus.CANCELLED, "天气查询已取消", "CANCELLED", call, false, service.sources());
-        } finally { if (context == null) control.close(); }
+        } finally {
+            if (context == null) control.close();
+            else context.telemetry().toolHttpRequests(call.requests());
+        }
     }
     private ToolResult result(ToolStatus status, String content, String code, WeatherCall call, boolean hasValue, List<ToolSource> sources) {
         LOG.info("Weather tool finished; status={}; httpRequests={}", status, call.requests());

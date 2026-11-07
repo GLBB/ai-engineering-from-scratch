@@ -7,6 +7,7 @@ import dev.learning.agent.deepseek.model.ChatChunk;
 import dev.learning.agent.deepseek.model.ProviderUsage;
 import dev.learning.agent.model.AssistantTurn;
 import dev.learning.agent.model.TokenUsage;
+import dev.learning.agent.model.ModelStreamObserver;
 import dev.learning.agent.model.ToolCall.FunctionCall;
 import dev.learning.agent.model.ToolCall;
 
@@ -37,10 +38,17 @@ public final class StreamAssembler {
     private boolean done;
     private int chunks;
     private TokenUsage usage;
+    private final ModelStreamObserver observer;
+    private String responseId;
+    private String responseModel;
 
     public StreamAssembler(ObjectMapper json, Consumer<String> onText) {
+        this(json, onText, ModelStreamObserver.NOOP);
+    }
+    public StreamAssembler(ObjectMapper json, Consumer<String> onText, ModelStreamObserver observer) {
         this.json = json;
         this.onText = onText;
+        this.observer = observer;
     }
 
     public AssistantTurn read(InputStream input) throws IOException {
@@ -66,18 +74,24 @@ public final class StreamAssembler {
         if (finishReason == null) throw new IOException("DeepSeek stream has no finish reason");
         List<ToolCall> completedCalls = new ArrayList<>();
         for (CallParts call : calls.values()) completedCalls.add(call.build());
+        // DeepSeek may attach final usage to a choice rather than a separate empty-choices frame.
+        if (usage != null) observer.usage(usage, true);
         LOG.debug("SSE assembled; chunks={}; text chars={}; reasoning chars={}; tool calls={}; finish={}",
                 chunks, content.length(), reasoningContent.length(), completedCalls.size(), finishReason);
         return new AssistantTurn(content.toString(), List.copyOf(completedCalls), finishReason,
-                reasoningContent.isEmpty() ? null : reasoningContent.toString(), null, usage);
+                reasoningContent.isEmpty() ? null : reasoningContent.toString(), null, usage,
+                new AssistantTurn.ResponseMetadata(responseId, responseModel));
     }
 
     private void dispatch(StringBuilder event) throws IOException {
         if (event.isEmpty()) return;
         if ("[DONE]".contentEquals(event)) { done = true; return; }
         ChatChunk chunk = json.readValue(event.toString(), ChatChunk.class);
+        if (chunk.id() != null) responseId = chunk.id();
+        if (chunk.model() != null) responseModel = chunk.model();
         usage = TokenUsage.merge(usage,
                 ProviderUsage.toTokenUsage(chunk.usage()));
+        if (chunk.usage() != null) observer.usage(usage, chunk.choices() != null && chunk.choices().isEmpty());
         chunks++;
         if (chunk.choices() == null) return;
         for (ChunkChoice choice : chunk.choices()) {
@@ -85,17 +99,22 @@ public final class StreamAssembler {
             ChunkDelta delta = choice.delta();
             if (delta == null) continue;
             if (delta.content() != null && !delta.content().isEmpty()) {
+                observer.chunk(true);
                 content.append(delta.content());
                 LOG.debug("SSE chunk {}: text chars={}", chunks, delta.content().length());
                 onText.accept(delta.content());
             }
             if (delta.reasoningContent() != null && !delta.reasoningContent().isEmpty()) {
+                observer.chunk(false);
                 reasoningContent.append(delta.reasoningContent());
                 LOG.debug("SSE chunk {}: reasoning chars={}", chunks, delta.reasoningContent().length());
             }
             if (delta.toolCalls() == null) continue;
-            for (ToolCallDelta part : delta.toolCalls())
+            for (ToolCallDelta part : delta.toolCalls()) {
+                if (part.function() != null && (part.function().arguments() != null && !part.function().arguments().isEmpty()
+                        || part.function().name() != null && !part.function().name().isEmpty())) observer.chunk(false);
                 calls.computeIfAbsent(part.index(), ignored -> new CallParts()).append(part);
+            }
             LOG.debug("SSE chunk {}: tool fragments={}", chunks, delta.toolCalls().size());
         }
         int length = content.length() + reasoningContent.length();

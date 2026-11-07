@@ -1,6 +1,8 @@
 package dev.learning.agent.deepseek;
 
 import dev.learning.agent.core.runtime.RunControl;
+import dev.learning.agent.core.runtime.ExternalObserver;
+import dev.learning.agent.model.ModelStreamObserver;
 import dev.learning.agent.deepseek.model.ProviderUsage;
 import dev.learning.agent.model.AssistantBlock;
 import dev.learning.agent.model.AssistantTurn;
@@ -34,8 +36,11 @@ public final class AnthropicClient implements ChatModel {
     private final StreamingHttp http;
 
     public AnthropicClient(ObjectMapper json, String key, String baseUrl) {
+        this(json, key, baseUrl, ExternalObserver.NOOP);
+    }
+    public AnthropicClient(ObjectMapper json, String key, String baseUrl, ExternalObserver observer) {
         this.json = json.copy().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-        this.http = new StreamingHttp(this.json, key, baseUrl, "/anthropic/v1/messages");
+        this.http = new StreamingHttp(this.json, key, baseUrl, "/anthropic/v1/messages", observer);
     }
 
     @Override
@@ -44,8 +49,12 @@ public final class AnthropicClient implements ChatModel {
     @Override
     public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control)
             throws IOException, InterruptedException {
+        return stream(modelRequest, onText, control, ModelStreamObserver.NOOP);
+    }
+    public AssistantTurn stream(ModelRequest modelRequest, Consumer<String> onText, RunControl control, ModelStreamObserver observer)
+            throws IOException, InterruptedException {
         try (InputStream input = http.send(request(modelRequest), control)) {
-            return read(input, onText);
+            return read(input, onText, observer);
         }
     }
 
@@ -115,10 +124,14 @@ public final class AnthropicClient implements ChatModel {
     }
 
     AssistantTurn read(InputStream input, Consumer<String> onText) throws IOException {
+        return read(input, onText, ModelStreamObserver.NOOP);
+    }
+    AssistantTurn read(InputStream input, Consumer<String> onText, ModelStreamObserver observer) throws IOException {
         Map<Integer, BlockBuilder> blocks = new TreeMap<>();
         String[] stopReason = new String[1];
         boolean[] done = new boolean[1];
         TokenUsage[] usage = new TokenUsage[1];
+        AssistantTurn.ResponseMetadata[] metadata = new AssistantTurn.ResponseMetadata[1];
         StreamingHttp.readEvents(input, data -> {
             EventType event = json.readValue(data, EventType.class);
             if (event.type() == null || "error".equals(event.type())) {
@@ -127,7 +140,11 @@ public final class AnthropicClient implements ChatModel {
             switch (event.type()) {
                 case "message_start" -> {
                     MessageStart start = json.readValue(data, MessageStart.class);
-                    if (start.message() != null) usage[0] = ProviderUsage.toTokenUsage(start.message().usage());
+                    if (start.message() != null) {
+                        usage[0] = ProviderUsage.toAnthropicUsage(start.message().usage());
+                        observer.usage(usage[0], false);
+                        metadata[0] = new AssistantTurn.ResponseMetadata(start.message().id(), start.message().model());
+                    }
                 }
                 case "content_block_start" -> {
                     BlockStart start = json.readValue(data, BlockStart.class);
@@ -135,16 +152,24 @@ public final class AnthropicClient implements ChatModel {
                         throw new IOException("invalid Anthropic content block");
                     }
                     blocks.put(start.index(), new BlockBuilder(start.contentBlock()));
+                    Block initial = start.contentBlock();
+                    if (initial.text() != null && !initial.text().isEmpty()) observer.chunk(true);
+                    else if ("tool_use".equals(initial.type()) || initial.thinking() != null && !initial.thinking().isEmpty()) observer.chunk(false);
                 }
                 case "content_block_delta" -> {
                     BlockDelta part = json.readValue(data, BlockDelta.class);
                     BlockBuilder block = blocks.get(part.index());
                     if (block == null || part.delta() == null) throw new IOException("missing Anthropic content block");
-                    block.append(part.delta(), onText);
+                    Delta delta = part.delta();
+                    if (delta.text() != null && !delta.text().isEmpty()) observer.chunk(true);
+                    else if (delta.thinking() != null && !delta.thinking().isEmpty()
+                            || delta.partialJson() != null && !delta.partialJson().isEmpty()) observer.chunk(false);
+                    block.append(delta, onText);
                 }
                 case "message_delta" -> {
                     MessageDelta part = json.readValue(data, MessageDelta.class);
-                    usage[0] = TokenUsage.merge(usage[0], ProviderUsage.toTokenUsage(part.usage()));
+                    usage[0] = TokenUsage.merge(usage[0], ProviderUsage.toAnthropicUsage(part.usage()));
+                    if (part.usage() != null) observer.usage(usage[0], part.delta() != null && part.delta().stopReason() != null);
                     if (part.delta() != null && part.delta().stopReason() != null) stopReason[0] = part.delta().stopReason();
                 }
                 case "message_stop" -> done[0] = true;
@@ -178,7 +203,7 @@ public final class AnthropicClient implements ChatModel {
             throw new IOException("Anthropic stop reason does not match tool calls");
         }
         return new AssistantTurn(text.toString(), List.copyOf(calls), calls.isEmpty() ? "stop" : "tool_calls",
-                reasoning.isEmpty() ? null : reasoning.toString(), List.copyOf(saved), usage[0]);
+                reasoning.isEmpty() ? null : reasoning.toString(), List.copyOf(saved), usage[0], metadata[0]);
     }
 
     private final class BlockBuilder {
@@ -232,7 +257,7 @@ public final class AnthropicClient implements ChatModel {
     record Delta(String type, String text, String thinking, String signature,
                  @JsonProperty("partial_json") String partialJson) {}
     record MessageStart(MessageInfo message) {}
-    record MessageInfo(ProviderUsage usage) {}
+    record MessageInfo(ProviderUsage usage, String id, String model) {}
     record MessageDelta(Stop delta, ProviderUsage usage) {}
     record Stop(@JsonProperty("stop_reason") String stopReason) {}
 }

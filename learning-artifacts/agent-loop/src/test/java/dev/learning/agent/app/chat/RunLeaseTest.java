@@ -41,7 +41,7 @@ class RunLeaseTest {
         lease.cancel("disconnect");
         assertTrue(cancelled.await(2, TimeUnit.SECONDS));
         assertTrue(session.status().running());
-        assertThrows(ApiFailure.class, () -> session.accept("another", ModelSettings.defaults(), null));
+        assertThrows(ApiFailure.class, () -> session.accept("another", ModelSettings.defaults(), AgentMode.PLAN_EXECUTE));
         cleanup.countDown(); worker.get(3, TimeUnit.SECONDS);
         assertFalse(session.status().running());
     }
@@ -49,13 +49,14 @@ class RunLeaseTest {
         AgentSessions.Session session = sessions((r,t,c) -> new AssistantTurn("ok", List.of(), "stop")).create();
         RunLease first = session.accept("first", ModelSettings.defaults(), AgentMode.REWOO);
         first.cancel("before start");
-        RunLease next = session.accept("second", ModelSettings.defaults(), null);
+        RunLease next = session.accept("second", ModelSettings.defaults(), AgentMode.REACT);
         first.finish(); first.cancel("late timeout");
         new AgentRunInterceptor(first).afterCompletion(null, null);
         assertEquals(next.requestId(), session.status().activeRequestId());
+        assertEquals(AgentMode.REACT, next.context().mode());
         assertTrue(session.status().running()); next.cancel("test cleanup");
     }
-    @Test void concurrentFirstRequestsOnlyBindOneMode() throws Exception {
+    @Test void concurrentRequestsAcceptOnlyOneRunAndItsMode() throws Exception {
         AgentSessions.Session session = sessions((r,t,c) -> new AssistantTurn("ok", List.of(), "stop")).create();
         CyclicBarrier gate = new CyclicBarrier(2);
         java.util.function.Function<AgentMode, RunLease> accept = mode -> {

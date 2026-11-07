@@ -47,7 +47,8 @@ class ModelOptionsTest {
                 + "data: [DONE]\n\n";
         var answer = new StreamAssembler(json, ignored -> {}).read(new ByteArrayInputStream(frames.getBytes(StandardCharsets.UTF_8)));
         assertEquals("ok", answer.content());
-        assertEquals(new TokenUsage(20L, 7L, 10L, 3L), answer.usage());
+        assertEquals(new TokenUsage(20L, 7L, 10L, 3L, null, TokenUsage.InputAccounting.INCLUDES_CACHE), answer.usage());
+        assertEquals(20L, answer.usage().totalInputTokens());
     }
 
     @Test void hugeReasoningIsRejectedEvenWithoutVisibleText() {

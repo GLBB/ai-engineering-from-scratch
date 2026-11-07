@@ -6,6 +6,7 @@ import org.springframework.boot.web.servlet.context.ServletWebServerApplicationC
 
 /** Starts the local Spring Boot browser interface. */
 @SpringBootApplication
+@org.springframework.context.annotation.Import(dev.learning.agent.observability.TelemetryConfiguration.class)
 public class WebMain {
     public static void main(String[] args) {
         var context = SpringApplication.run(WebMain.class, args);

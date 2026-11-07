@@ -9,4 +9,10 @@ import java.util.UUID;
 public record DefaultRunContext(UUID requestId, AgentMode mode, RunBudget budget,
                                 RunControl control, RunEvents events, EvidenceStore evidence,
                                 ModelGateway model, ToolExecutionService tools,
-                                ApprovalGateway approvals) implements RunContext {}
+                                ApprovalGateway approvals, RunTelemetry telemetry) implements RunContext {
+    public DefaultRunContext(UUID requestId, AgentMode mode, RunBudget budget, RunControl control,
+                             RunEvents events, EvidenceStore evidence, ModelGateway model,
+                             ToolExecutionService tools, ApprovalGateway approvals) {
+        this(requestId, mode, budget, control, events, evidence, model, tools, approvals, RunTelemetry.NOOP);
+    }
+}

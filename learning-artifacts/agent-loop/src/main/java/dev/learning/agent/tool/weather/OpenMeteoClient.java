@@ -43,16 +43,24 @@ import java.util.concurrent.TimeoutException;
  * A future completes only after the bounded body, so the timeout covers body reads.
  */
 public final class OpenMeteoClient implements WeatherProvider {
+    private final dev.learning.agent.core.runtime.ExternalObserver observer;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final ObjectMapper json;
     private final URI geocoding;
     private final URI forecast;
 
     public OpenMeteoClient(ObjectMapper json) {
-        this(json, URI.create("https://geocoding-api.open-meteo.com/v1/search"), URI.create("https://api.open-meteo.com/v1/forecast"));
+        this(json, dev.learning.agent.core.runtime.ExternalObserver.NOOP);
+    }
+    public OpenMeteoClient(ObjectMapper json, dev.learning.agent.core.runtime.ExternalObserver observer) {
+        this(json, URI.create("https://geocoding-api.open-meteo.com/v1/search"), URI.create("https://api.open-meteo.com/v1/forecast"), observer);
     }
     // Loopback fixtures use these endpoints; production never reads endpoints from tool arguments.
     OpenMeteoClient(ObjectMapper json, URI geocoding, URI forecast) {
+        this(json, geocoding, forecast, dev.learning.agent.core.runtime.ExternalObserver.NOOP);
+    }
+    OpenMeteoClient(ObjectMapper json, URI geocoding, URI forecast, dev.learning.agent.core.runtime.ExternalObserver observer) {
+        this.observer = observer;
         this.json = json.copy().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT).enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         for (LogicalType type : List.of(LogicalType.Float, LogicalType.Integer, LogicalType.Boolean))
@@ -152,6 +160,16 @@ public final class OpenMeteoClient implements WeatherProvider {
         coordinates(body.latitude(), body.longitude());
     }
     private <T> T get(URI endpoint, Map<String, String> params, Class<T> type, WeatherCall call) throws IOException, InterruptedException {
+        try (var span = observer.http("GET", endpoint)) {
+            try { return get(endpoint, params, type, call, span); }
+            catch (IOException | InterruptedException | RuntimeException error) {
+                if (error instanceof WeatherFailure failure) span.error(failure.code()); else span.fail(error);
+                throw error;
+            }
+        }
+    }
+    private <T> T get(URI endpoint, Map<String, String> params, Class<T> type, WeatherCall call,
+                      dev.learning.agent.core.runtime.TraceSpan span) throws IOException, InterruptedException {
         String query = params.entrySet().stream().map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue()))
                 .collect(java.util.stream.Collectors.joining("&"));
         long timeout = call.requestTimeoutMillis();
@@ -162,6 +180,8 @@ public final class OpenMeteoClient implements WeatherProvider {
         AutoCloseable cancellation = call.control().onCancel(() -> future.cancel(true));
         try {
             HttpResponse<byte[]> response = future.get(timeout, TimeUnit.MILLISECONDS);
+            span.attribute("http.response.status_code", response.statusCode());
+            if (response.statusCode() >= 400) span.error("HTTP_" + response.statusCode());
             call.control().check();
             if (response.statusCode() == 429) throw new WeatherFailure("WEATHER_RATE_LIMITED", "天气服务请求限流");
             if (response.statusCode() != 200) throw new WeatherFailure("WEATHER_UNAVAILABLE", "天气服务返回 HTTP " + response.statusCode());

@@ -81,11 +81,12 @@ function setInputDisabled(disabled) {
   modeSelect.disabled = disabled;
   newConversation.disabled = pending || state.running;
   modeSelect.value = state.mode;
-  modeSelect.hidden = state.modeLocked;
-  document.querySelector('#mode-label').hidden = state.modeLocked;
-  currentMode.hidden = !state.modeLocked;
-  currentMode.textContent = `执行模式：${modeNames[state.mode]}`;
-  modeHint.textContent = state.modeLocked ? '本对话模式已固定，新建对话可切换。' : '首条消息发送后固定，可新建对话切换。';
+  const executing = pending || state.running;
+  modeSelect.hidden = executing;
+  document.querySelector('#mode-label').hidden = executing;
+  currentMode.hidden = !executing;
+  currentMode.textContent = `本轮模式：${modeNames[state.mode]}`;
+  modeHint.textContent = executing ? '本轮执行中，结束后可选择下一轮模式。' : '每条消息可选择模式，保留当前对话上下文。';
 }
 
 function scrollToLatest() {
@@ -114,7 +115,7 @@ function addMessage(role, content = '') {
   row.append(avatar, body);
   conversation.append(row);
   scrollToLatest();
-  return { body, text };
+  return { body, text, label };
 }
 
 function addNote(parent, content, isError = false) {
@@ -219,6 +220,10 @@ async function sendPrompt(prompt, settings) {
       if (requestSession !== sessionId) return;
       if (event.type === 'run_started') {
         state = conversationState.started(state, event.data);
+        traceView.started(turnNumber, event.data);
+        const reference = traceView.reference(event.data);
+        if (reference) answer.body.insertBefore(reference, answer.text);
+        answer.label.textContent = `Agent · ${modeNames[event.data.mode]}`;
         try { localStorage.setItem('agent-mode', state.mode); } catch (_) { /* Optional preference. */ }
         setInputDisabled(true);
       }
@@ -377,6 +382,9 @@ async function createConversation() {
     if (sessionId) promptInput.focus();
   }
 }
-modeSelect.addEventListener('change', () => { state = conversationState.select(state, modeSelect.value); });
+modeSelect.addEventListener('change', () => {
+  state = conversationState.select(state, modeSelect.value);
+  try { localStorage.setItem('agent-mode', state.mode); } catch (_) { /* Optional preference. */ }
+});
 newConversation.addEventListener('click', createConversation);
 createConversation();

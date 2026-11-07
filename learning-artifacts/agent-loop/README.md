@@ -6,9 +6,11 @@
 
 想通过代码理解项目，可以从 [docs/Agent Loop 学习指南](docs/README.md) 开始，按顺序了解项目结构、一次对话的执行过程、协议适配和调试方法。
 
-[三模式技术方案](docs/design/agent-execution-technical-design.md) 是 ReAct / ReWOO / Plan-and-Execute 的统一开发依据，包含 Java 接口、执行算法、状态机、逐文件改动和验收计划；[研究记录](docs/design/agent-execution-research.md)保留来源与离线实测。模式在新对话首次发送前选择，接受后固定；三种模式均已实现；[实施验证](docs/design/agent-execution-research.md#实施后验证2026-11-01)记录本轮测试、真实接口矩阵和验证边界。
+[三模式技术方案](docs/design/agent-execution-technical-design.md) 是 ReAct / ReWOO / Plan-and-Execute 的统一开发依据，包含 Java 接口、执行算法、状态机、逐文件改动和验收计划；[研究记录](docs/design/agent-execution-research.md)保留来源与离线实测。每条消息发送前均可选择模式，本轮运行中固定；三种模式均已实现；[实施验证](docs/design/agent-execution-research.md#实施后验证2026-11-01)记录初版测试、真实接口矩阵和验证边界。
 
 [天气能力实现方案](docs/design/weather-capability-implementation-plan.md) 说明已接入的 Open-Meteo 当前天气与 1–7 天逐日预报，包含参数、地点消歧、通用工具扩展和实际验收记录。
+
+[Trace 接入技术方案](docs/design/observability-trace-implementation-plan.md) 说明如何通过原生 OpenTelemetry Java SDK 对接已安装的本机 Langfuse，包含规范研究、span 清单、字段映射与实际验收记录；[Trace 阅读指南](docs/07-reading-agent-traces.md)用三种模式和天气案例帮助理解项目。已通过原生 OTel SDK 接入独立的 `agent-loop-learning` 项目；指南区分示意树与可直接打开的真实 Trace。
 
 [三种协议图解](docs/06-three-protocols-by-example.md) 用同一次真实计算对话，逐项标注规则、用户、助手、工具结果和宿主程序，展示完整请求与响应，并解释 developer 与思考内容的归属。
 
@@ -27,7 +29,7 @@ node --test src/test/js/*.test.js
 mvn spring-boot:run
 ```
 
-打开 `http://127.0.0.1:8080`，在对话框上方选择执行模式，输入问题并查看回答。首条请求被接受后，模式栏改为只读；运行失败也不会解除锁定。点击同一栏右侧的“新建对话”可重新选择模式。Bash 命令执行前以及命令输出发送给 DeepSeek 前，页面会分别要求确认。按 `Ctrl+C` 停止服务。服务只监听本机；端口可由 `AGENT_PORT` 调整。检测到 HTTP 断连或超时后取消本轮资源；普通浏览器关闭不保证立刻被服务端检测。确认最多等待 5 分钟，整轮最多 15 分钟。
+打开 `http://127.0.0.1:8080`，在对话框上方选择本轮执行模式，输入问题并查看回答。发送后模式栏暂时改为只读，结束或失败并清理完成后恢复选择；下一条消息可以切换为其他模式，仍保留当前对话上下文。每条回答和对应轨迹标明其实际模式。“新建对话”用于清空上下文，切换模式无需新建。Bash 命令执行前以及命令输出发送给 DeepSeek 前，页面会分别要求确认。按 `Ctrl+C` 停止服务。服务只监听本机；端口可由 `AGENT_PORT` 调整。检测到 HTTP 断连或超时后取消本轮资源；普通浏览器关闭不保证立刻被服务端检测。确认最多等待 5 分钟，整轮最多 15 分钟。
 
 输入框下方可选 `DeepSeek V4.1 Flash` 或 `DeepSeek V4 Pro`，推理等级可选 `Off`、`Low`、`High`、`Max`。默认 `Off`；选择其他等级会开启 Think，并将该等级用于这一轮用户请求的所有模型调用。下一轮可重新选择。模型 ID 和等级按 2026-10-31 的 [DeepSeek 模型列表](https://api-docs.deepseek.com/api/list-models/) 与 [思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/) 配置。
 
@@ -46,12 +48,36 @@ mvn spring-boot:run
 
 请从环境变量提供 key，不要把 key 写入代码或提交到 Git。
 
+### 开启 Langfuse Trace
+
+本机已创建独立的 `agent-loop-learning` 项目，配置保存在仓库外的 `~/.config/langfuse/agent-loop.env`（权限 `0600`）。DeepSeek key 仍从启动进程的环境读取：
+
+```bash
+./run-with-tracing.sh
+```
+
+普通 `mvn spring-boot:run` 默认关闭 tracing。脚本加载私有配置并启动应用；其他机器可用 `AGENT_TRACE_ENV_FILE` 指定自己的环境文件。开启后每轮回答与轨迹摘要显示 Trace 链接，跳转本机 Langfuse 查看执行树。同一对话可以逐轮切换执行模式，每轮独立建 trace，通过观测 Session ID 分组。
+
+| 环境变量 | 用途 |
+| --- | --- |
+| `AGENT_TRACING_ENABLED` | `true` 开启；默认 `false`，关闭时使用 Noop。 |
+| `LANGFUSE_BASE_URL` | 默认 `http://127.0.0.1:3035`；远程地址须 HTTPS。 |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | 开启时必填，使用本项目 key。 |
+| `LANGFUSE_PROJECT_ID` | 用于生成页面链接；未设置时仍显示 traceId。 |
+| `AGENT_TRACE_CONTENT` | 默认 `metadata`；`learning` 额外保存脱敏限长的教学预览。 |
+| `AGENT_TRACE_SAMPLE_RATIO` | 默认 `1.0`，范围 `0–1`。 |
+| `AGENT_RELEASE` | 构建版本标识，默认 `1.0-SNAPSHOT`。 |
+
+默认只保存结构、状态、计数、Token 和安全摘要。需要对照受控练习的文字时运行 `AGENT_TRACE_CONTENT=learning ./run-with-tracing.sh`。两种模式都不上传完整提示词、历史、reasoning 或 Bash 原文；涉及 Bash 后，该 Session 后续自由文本预览关闭。网页本地轨迹依然能显示模型实际返回的思考内容。
+
+三协议 × 三模式 × 计算 / 天气的 **18 组真实运行均已写入并回读 Langfuse**；Java 147 项、前端 10 项测试通过。复现使用 `mvn package` 后运行 `python3 experiments/trace_verification.py`，该脚本会真实调用模型和天气 API，并以 learning 模式保存受控样本。可读案例见 [Trace 阅读指南](docs/07-reading-agent-traces.md#10-用真实-trace-复盘)。
+
 ## 系统架构
 
 ```mermaid
 flowchart TD
     Page[浏览器：模式栏 / 对话 / 计划 / 轨迹] --> HTTP[ChatController]
-    HTTP --> Session[Session：固定模式与唯一 activeRun]
+    HTTP --> Session[Session：共享对话记忆与唯一 activeRun]
     Session --> Lease[RunLease：请求身份与生命周期]
     Lease --> React[ReActRunner：对话历史]
     Lease --> Rewoo[RewooRunner：静态计划与证据]
@@ -81,6 +107,7 @@ flowchart TD
 | [`model/`](src/main/java/dev/learning/agent/model/) | 模型调用入口、Gateway，以及三种协议共用的消息、回复、工具描述和用量契约。 |
 | [`deepseek/`](src/main/java/dev/learning/agent/deepseek/) | 三个协议客户端、HTTP/SSE；`deepseek.model` 仅保留 ChatRequest、ChatChunk、ProviderUsage 协议 DTO。 |
 | [`tool/`](src/main/java/dev/learning/agent/tool/) | 通用参数契约、工具自主解码、注册与执行服务；天气能力位于 tool/weather。 |
+| [`observability/`](src/main/java/dev/learning/agent/observability/) | OTel SDK 初始化、span / 字段映射、内容策略与用量归一化；业务只依赖 runtime 观测接口。 |
 | [`support/json/`](src/main/java/dev/learning/agent/support/json/) | 严格 JSON 解析、字段读取与序列化；不认识具体工具或执行策略。 |
 | [`static/`](src/main/resources/static/) | 浏览器页面、样式、对话状态与轨迹脚本。 |
 | [`logback.xml`](src/main/resources/logback.xml) | 文件日志配置。 |
@@ -90,6 +117,10 @@ flowchart TD
 ## 执行内核改造
 
 现有 ReAct 已拆成 `ReActRunner`（会话历史）和 `DefaultReActEngine`（模型与工具反馈循环）。`DefaultModelGateway` 统一模型调用、预算与轨迹，`DefaultToolExecutionService` 保存结构化证据；三个协议客户端支持纯文本请求与明确输出上限。工具结果通过调用 ID 配对，并包含宿主证据 ID 和状态。ReWOO 直接执行验证后的工具计划；Plan-and-Execute 通过 StepExecutor 复用内核，步骤后检查是否继续或修订。
+
+[逐轮模式验证](docs/design/agent-execution-research.md#逐轮模式与共享记忆验证2026-11-02)记录 129 项 Java 测试、10 项前端测试、三协议 12/12 轮真实请求与浏览器操作。可在设置好环境变量后运行 `python3 experiments/session_mode_switch.py` 复现。
+
+Session 额外维护最近最多 4 轮、总计约 24,000 字符的共享问答及运行摘要。连续使用同一模式时保留 Runner；切换时基于共享快照创建新的 Runner，切回原模式也包含中间的对话。跨模式不迁移原生 tool 消息、reasoning blocks、计划或旧 EvidenceStore；本轮工具证据和确认重新建立。失败或取消保留状态与工具是否执行的摘要，不把任务当成成功。
 
 ## 三种模式如何比较
 
@@ -163,7 +194,7 @@ sequenceDiagram
 | `calculator` | `expression`：支持 `+`、`-`、`*`、`/` 和括号。 | 限制表达式长度、嵌套深度和运算次数；非法表达式返回错误。 |
 | `current_weather` / `weather_forecast` | city、可选 country_code/admin1；预报可选 days=1–7。 | 地点不明先澄清，固定来源与单位；无需天气密钥。 |
 | `search` | `query`：通过 Exa 搜索，返回标题、URL 和摘要，最多请求 5 条。 | 查询最长 500 字符，HTTP 请求超时为 30 秒；缺少 key 时返回错误。 |
-| `bash` | `command`：在项目目录运行 Bash 命令。 | 执行前确认一次，输出发送给 DeepSeek 前再确认一次；最长 15 秒，捕获输出约 12 KB。子进程不继承 DeepSeek 和 Exa 的 API key。 |
+| `bash` | `command`：在项目目录运行 Bash 命令。 | 执行前确认一次，输出发送给 DeepSeek 前再确认一次；最长 15 秒，捕获输出约 12 KB。子进程不继承 DeepSeek、Exa、Langfuse 的 API key 或 OTLP 认证配置。 |
 
 Bash 仍能访问当前用户有权限访问的本地文件，请在两次确认时检查命令和输出。工具执行顺序、循环次数和超时都可以从相应类中查看或修改。
 
@@ -191,7 +222,7 @@ Open-Meteo 免费接口用于非商业学习并要求注明来源。真实接口
 tail -f logs/agent.log
 ```
 
-文件保存 `DEBUG` 及以上级别。文件按日期和大小轮转：单个文件达到约 1 MB 时归档，保留最近 5 天，归档总量上限约 5 MB，当前活动文件另计。配置见 [`logback.xml`](src/main/resources/logback.xml)。这些日志用于查看执行过程，当前项目没有接入独立的链路追踪系统。
+文件保存 `DEBUG` 及以上级别。文件按日期和大小轮转：单个文件达到约 1 MB 时归档，保留最近 5 天，归档总量上限约 5 MB，当前活动文件另计。配置见 [`logback.xml`](src/main/resources/logback.xml)。日志中的 requestId / traceId 可关联页面与 Langfuse；开启 tracing 后，执行阶段、模型、工具与外部 HTTP 以独立 span 记录。
 
 ## 在 IntelliJ IDEA 中
 

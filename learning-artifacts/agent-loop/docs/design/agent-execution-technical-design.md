@@ -1,6 +1,6 @@
 # Agent 三模式技术方案 v1
 
-日期：2026-11-01（Asia/Shanghai） · 状态：T1–T5 已实现；18 组真实接口固定算术验收通过
+更新：2026-11-02（Asia/Shanghai） · 状态：三模式已实现；已调整为逐轮选择模式，共享对话记忆。初版 18 组真实接口算术记录见研究文档。
 
 [项目](../../README.md) · [研究证据](agent-execution-research.md) · [界面示意](figures/execution-modes-ui.svg)
 
@@ -23,8 +23,8 @@
 ## 2. 实施范围与固定决策
 
 1. 在当前 Java 17 / Spring Boot 3.5.16 项目扩展，使用现有依赖。
-2. 在对话框上方的独立模式栏选择 REACT、REWOO 或 PLAN_EXECUTE；新对话首次请求被服务端接受后，原位改为只读标识，模式固定。
-3. 同一对话一个 runner、一份历史；一次只执行一个用户轮次。模式冲突与运行冲突都在后端拒绝。
+2. 在对话框上方的独立模式栏选择 REACT、REWOO 或 PLAN_EXECUTE；每轮请求发送后原位改为只读标识，清理完成后恢复选择。
+3. 同一对话一份共享记忆，一次只执行一个用户轮次。切换时基于快照新建 Runner；连续同模式复用 Runner。
 4. 模型和推理等级可逐轮选择，在本轮所有模型调用中保持一致；协议仍启动时确定，保存后重启生效。
 5. ReWOO 使用静态工具计划与串行拓扑执行；P&E 使用高层计划、步骤内 ReAct、执行后检查与有界修订。
 6. 三模式复用模型调用、工具执行、预算、取消和事件；ReWOO 工具计划与 P&E 高层计划使用不同类型。
@@ -36,7 +36,7 @@
 | ReWOO | 工具、参数、证据引用 | Worker 不调用模型 | Solver 汇总证据 |
 | P&E | 高层目标、条件与工具范围 | 步骤内选工具；步骤后决定继续、修订或结束 | Finalizer 汇总证据 |
 
-P&E 的内部计划可以变，所属对话的模式不变。Plan-and-Execute 的高层步骤执行与重规划变体依据见[研究记录](agent-execution-research.md)；不把“ReWOO 加一次失败重试”作为第三种模式的实现。
+P&E 的内部计划可以变，本轮模式不变，下一条用户消息可选择其他模式。Plan-and-Execute 的高层步骤执行与重规划变体依据见[研究记录](agent-execution-research.md)；不把“ReWOO 加一次失败重试”作为第三种模式的实现。
 
 ## 3. 改造动机与当前调用链
 
@@ -56,7 +56,7 @@ P&E 的内部计划可以变，所属对话的模式不变。Plan-and-Execute �
 
 ```mermaid
 flowchart TD
-    C[ChatController：校验并接受请求] --> S[Session：绑定模式、持有 runner 和历史]
+    C[ChatController：校验并接受请求] --> S[Session：共享记忆、逐轮选择 Runner]
     S --> A[ReActRunner]
     S --> R[RewooRunner]
     S --> P[PlanExecuteRunner]
@@ -229,53 +229,55 @@ public interface RunContext {
 
 ## 5. 对话生命周期与 HTTP 接口
 
-### 5.1 状态与锁定时机
+### 5.1 Session 管对话，RunLease 固定本轮模式
+
+Session 不需要绑定执行算法。用户可以在同一对话中先用 ReAct，下一条消息用 ReWOO，再用 Plan-and-Execute。需要固定的是已接受请求的 mode、模型设置、预算和取消范围；它们属于 RunLease。本次请求结束前不能在中途换算法。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> NEW
-    NEW --> NEW: 输入校验失败
-    NEW --> RUNNING: 原子接受首条请求并绑定模式
-    RUNNING --> IDLE: 成功、失败或取消后清理完成
-    IDLE --> RUNNING: 同一模式的下一轮
-    IDLE --> IDLE: 拒绝模式冲突
-    RUNNING --> RUNNING: 拒绝并发请求
+    [*] --> IDLE
+    IDLE --> IDLE: 输入校验失败，保持上下文与选择
+    IDLE --> RUNNING: 原子接受请求，确定本轮模式
+    RUNNING --> IDLE: 完成、失败或取消后清理完毕
+    RUNNING --> RUNNING: 拒绝任何模式的并发请求
 ```
 
-NEW 的 mode 为 null。IDLE 和 RUNNING 的 mode 永不改变；新建对话创建另一个 Session，而不是把原 Session 重置为 NEW。
+Session 串行执行，是为了按确定的顺序提交历史和回答。RunLease 隔离每次请求的事件、确认和取消；仅把历史列表改成线程安全集合，并没有定义两个并发分支应怎样合并。不同 Session 可以并行；P&E 在一条请求内部执行多个步骤，仍占用同一个 Session。
 
-同一个 Session 串行执行，是因为同一 Runner 持有一份需要按顺序更新的对话历史与运行策略。改造前还共享 currentSink 和等待确认的操作；两个请求同时运行时，既会交叉追加历史，也会覆盖输出通道、争用工具确认。当前 RunLease 已把事件和确认分给各次请求，但同一会话历史仍需要串行推进。即使把历史列表换成线程安全集合，也没有定义两条执行分支应怎样合并。改造前的 Session.begin 已用 running 防止这种并发；现在 accept 与 RunLease 延续并补齐这条规则。
-
-不同 Session 可以分别执行；如果将来要让同一对话并发，需要另外设计分支历史、独立输出与确认、结果合并规则。P&E 在一个请求内部执行多个步骤，仍占用同一个 Session，不等于接收了多个并发用户请求。
-
-Session 替换 `begin()` / `run(String, ModelSettings, EventSink)`，对外提供：
+Session 对外接口：
 
 | 方法 | 契约 |
 | --- | --- |
-| `synchronized RunLease accept(String prompt, ModelSettings settings, AgentMode requested)` | 校验状态、选择或核对模式、创建唯一 runner、建立 activeRun，原子完成 |
-| `RunResult execute(RunLease lease, EventSink events)` | 校验 lease 所属关系，执行 runner；finally 清理确认、事件通道和 activeRun |
-| `synchronized SessionStatus status()` | 返回 mode、modeLocked、running、activeRequestId |
-| `boolean decide(String approvalId, boolean approved)` | 沿用当前确认入口；仅针对当前 activeRun 的有效确认 |
-
-接受伪代码：
+| `synchronized RunLease accept(String prompt, ModelSettings settings, AgentMode requested)` | 校验空闲状态、选择 Runner、建立唯一 activeRun，原子完成；不再拒绝模式变化。 |
+| `RunResult execute(RunLease lease, EventSink events)` | 校验 lease 身份，执行并提交会话摘要，再清理确认、事件通道和 activeRun。 |
+| `synchronized SessionStatus status()` | 返回最近接受的 mode、running、activeRequestId；没有 modeLocked。 |
+| `boolean decide(String approvalId, boolean approved)` | 仅处理当前 activeRun 的有效确认。 |
 
 ```text
 accept(validatedPrompt):
     synchronized session:
         if activeRun exists: reject RUN_IN_PROGRESS
-        requested = supplied mode, or bound mode, or REACT
-        if bound mode exists and requested differs: reject MODE_LOCKED
-        candidateRunner = existing runner or factory.create(requested)
-        lease = new RunLease(requestId, immutable request, fresh run context)
-        bind mode and candidateRunner; assign activeRun = lease
+        selected = supplied mode, or last accepted mode, or REACT
+        if selected equals last accepted mode and runner exists:
+            candidate = current runner
+        else:
+            candidate = factory.create(selected, shared conversation snapshot)
+        lease = new RunLease(immutable request, selected, candidate, fresh context)
+        remember selected mode and candidate; assign activeRun = lease
         return lease
 ```
 
-基础输入校验和模型设置校验在 accept 前完成；纯内存 runner 构造失败时不提交绑定。接受完成之后即使模型失败，模式也保持锁定。
+新 Session 的 mode 为空；空闲时的 mode 表示最近一次已接受请求的模式，运行时表示本轮模式。浏览器空闲时保留自己的下一轮选择，不被轮询返回的旧 mode 覆盖。输入校验失败不改变 mode；构造 Runner 失败也不更新占用。接受后取消或失败，清理完成便能选择其他模式。
 
-### 5.2 请求和响应
+### 5.2 共享记忆与 HTTP 契约
 
-保留 `/api/chat`、`/api/session`、`/api/approve` 的当前用途，以及本地/同源检查和 X-Agent-Session 校验。
+仅放开模式下拉框会丢失上下文，因为原先每个 Runner 拥有自己的历史。因此 Session 增加独立的 ConversationMemory，保留最近最多 4 轮、总计约 24,000 字符的问答和运行摘要。每轮的摘要在 Runner 返回后、lease 释放前提交；异常退出也保存 FAILED / CANCELLED 和已发生工具尝试的状态。
+
+共享类型为 `ConversationTurn(question, answer, status, operations)`；每条 `ToolOutcome` 只有 tool、status、executed。它不包含原生命令调用 ID、参数、未获分享的输出、计划或 EvidenceStore。不能将前一轮的 E1 当作本轮可引用证据，旧确认也不构成新执行的授权。
+
+连续同模式保留当前 Runner，保持原有 ReAct 完整消息检查点和规划模式记忆。切换时根据共享快照新建 Runner；切回原模式也重新读取包含中间问答的快照，不能恢复一份落后的旧 Runner。ReAct 将快照转换成普通问答和明确的宿主状态消息；ReWOO / P&E 放入 TaskInput.history。历史状态只作上下文，不代表当前任务成功。限长共享记忆不保证保留更早的逐条工具输出。
+
+请求保持逐轮显式 mode：
 
 ```json
 {
@@ -286,7 +288,7 @@ accept(validatedPrompt):
 }
 ```
 
-`Prompt` 增加可空 AgentMode mode。新对话缺省为 REACT；已锁定对话省略 mode 时沿用绑定值。GET `/api/session` 新建响应为：
+省略 mode 时沿用最近接受的模式，新对话缺省 REACT。GET `/api/session` 返回新会话，GET `/api/session/status` 只查询已有会话，均不包含 modeLocked：
 
 ```json
 {
@@ -294,23 +296,21 @@ accept(validatedPrompt):
   "supportedModes": ["REACT", "REWOO", "PLAN_EXECUTE"],
   "defaultMode": "REACT",
   "mode": null,
-  "modeLocked": false,
-  "running": false
+  "running": false,
+  "activeRequestId": null
 }
 ```
 
-新增 GET `/api/session/status`，请求头必须携带已有 X-Agent-Session，响应包含 sessionId、mode、modeLocked、running、activeRequestId；它只查询，不创建会话。
-
-| 场景 | HTTP / 错误码 | 是否绑定模式 |
+| 场景 | HTTP / 错误码 | 会话行为 |
 | --- | --- | --- |
-| 空或超长 prompt、未知模型/等级/mode | 400 / INVALID_REQUEST | 否 |
-| 没有有效 sessionId | 401 / SESSION_NOT_FOUND | 否 |
-| 非法来源 | 403 / FORBIDDEN_ORIGIN | 否 |
-| 对话运行中 | 409 / RUN_IN_PROGRESS | 保持原状态 |
-| 已绑定模式与请求不同 | 409 / MODE_LOCKED | 保持原模式 |
-| 已接受，之后计划/模型/工具失败 | HTTP 200 内的失败事件 | 是 |
+| 空 / 超长 prompt、未知模型 / 等级 / mode | 400 / INVALID_REQUEST | 不改变历史或最近模式。 |
+| 无有效 sessionId | 401 / SESSION_NOT_FOUND | 不创建新会话。 |
+| 非法来源 | 403 / FORBIDDEN_ORIGIN | 不接受。 |
+| 对话运行中，包括请求了其他模式 | 409 / RUN_IN_PROGRESS | 保持原 run。 |
+| 空闲时请求另一模式 | 正常接受 | 读取共享快照、创建新 Runner。 |
+| 接受后模型 / 计划 / 工具失败 | HTTP 200 内的失败事件 | 记录实际状态，清理完成后可再选模式。 |
 
-错误体统一为 `ApiError(code, message)`；未知枚举等 Spring 反序列化异常也通过本地 ControllerAdvice 转换，不能返回默认 HTML。
+错误体统一为 `ApiError(code, message)`；本地/同源检查和 X-Agent-Session 校验保留。已经移除 MODE_LOCKED 错误。
 
 ### 5.3 RunLease：一次请求的执行占用与清理
 
@@ -365,7 +365,7 @@ sequenceDiagram
 
 Controller 注册 `AgentRunInterceptor implements CallableProcessingInterceptor`；handleTimeout、handleError 和 afterCompletion 都调用幂等的 lease.cancel。通过 WebAsyncManager.registerCallableInterceptor 绑定当前 requestId；finally 仍是运行中 lease 的唯一释放位置。这些是 Spring MVC 提供的异步生命周期钩子。[Spring 6.2 API](https://docs.spring.io/spring-framework/docs/6.2.x/javadoc-api/org/springframework/web/context/request/async/CallableProcessingInterceptor.html)
 
-测试覆盖上述三种时序，并分别检查执行是否启动、资源是否停止、占用是否被正确释放。关闭一次 RunLease 不会删除 Session 的历史或解除模式锁定；下一条消息建立新的 RunLease，继续使用同一 Runner。
+测试覆盖上述三种时序，并分别检查执行是否启动、资源是否停止、占用是否被正确释放。关闭一次 RunLease 不会删除 Session 的共享记忆；下一条消息建立新的 RunLease，可复用同模式 Runner，或从快照切换到另一模式。
 
 ## 6. 工具结果、证据与原生调用配对
 
@@ -453,7 +453,7 @@ execute(engineRequest, context):
 
 取消发生在一批工具执行中时，已执行结果进入账本，剩余调用补 CANCELLED / SKIPPED，形成完整本地检查点；之后不再请求模型。下一轮保留合法检查点，并附一条宿主生成的失败状态数据，明确上一轮未完成。不能丢失已执行副作用，再假定它从未发生。
 
-`StepExecutor` 的局部 transcript 不进入对话历史；仅保留步骤结果和证据。ReWOO/P&E 的对话历史保存最近最多 4 个已完成问答对、合计最多 24,000 字符，按完整问答对淘汰；模型不读取上一轮原始证据。
+`StepExecutor` 的局部 transcript 不进入对话历史；仅保留步骤结果和证据。ReWOO/P&E 的对话历史保存最近最多 4 轮问答与状态摘要、合计约 24,000 字符，按完整条目淘汰；模型不读取上一轮原始证据。
 
 ## 8. ReWOO 的具体实现
 
@@ -686,23 +686,23 @@ ChatRequest 增加 `forModel(ModelRequest)`，现有 forAgent 的参数填充合
 
 ### 12.1 前端状态
 
-新增纯状态模块 `static/conversation-state.js`，只管理 mode、modeLocked、running 和 activeRequestId；sessionId 由 app.js 持有，便于 Node 标准测试器验证。app.js 继续负责 DOM 与 fetch，trace.js 继续显示轨迹。
+新增纯状态模块 `static/conversation-state.js`，只管理 mode、running 和 activeRequestId；sessionId 由 app.js 持有，便于 Node 标准测试器验证。app.js 继续负责 DOM 与 fetch，trace.js 继续显示轨迹。
 
 布局顺序为：页面标题 → 对话/轨迹导航 → 独立执行模式栏 → 对话内容或轨迹 → 消息输入区。模式选择和只读展示使用同一位置，放在对话框上方；切换对话/轨迹视图时仍然可见。消息输入区只保留文本输入、模型、推理等级与发送按钮。
 
-index.html 在导航后、conversation 与 trace-view 之前新增 `section.mode-bar`，内部包含带可见标签的 `select#mode-select` 和只读 `strong#current-mode`。NEW 时只显示 select，锁定后只显示 strong；app.js 更新同一栏，不把模式控件移入 composer 或设置弹窗。窄屏下允许该栏换行，完整显示 Plan-and-Execute。
+index.html 在导航后、conversation 与 trace-view 之前新增 `section.mode-bar`，内部包含带可见标签的 `select#mode-select` 和只读 `strong#current-mode`。空闲时显示 select，等待接受与运行时只显示 strong，清理完成后恢复 select；app.js 更新同一栏，不把模式控件移入 composer 或设置弹窗。窄屏下允许该栏换行，完整显示 Plan-and-Execute。
 
 | 时点 | 模式控件 | 模型/推理等级 |
 | --- | --- | --- |
 | 新对话 | 对话框上方的模式栏显示三个选项；本地偏好只设置初值 | 可选 |
-| 首次请求等待接受 | 暂时禁用 | 禁用 |
+| 每轮请求等待接受 | 暂时禁用 | 禁用 |
 | 收到 run_started | 在模式栏原位替换为只读文本徽标 | 运行中禁用 |
-| 本轮完成或失败 | 保持只读 | 恢复可选 |
+| 本轮完成或失败且清理完毕 | 恢复选择，作用于下一条消息 | 恢复可选 |
 | 接受前 400/401/403/409 | 以已有会话状态恢复；不自行改写模式 | 根据 running 状态恢复 |
-| 首条请求网络异常 | 查询 session/status；查询失败保持待确认状态 | 等状态明确后恢复 |
+| 任意一轮网络异常 | 查询 session/status；查询失败保持待确认状态 | 等状态明确后恢复 |
 | 新对话 | 调用创建接口，替换 sessionId、清空当前视图 | 恢复选择 |
 
-本地偏好键 `agent-mode` 仅在服务端确认后写入；未知值退回 REACT。设置弹窗只保留协议和作用域说明，不出现第二个模式选择入口。
+本地偏好键 `agent-mode` 在用户选择与服务端确认时写入；未知值退回 REACT。设置弹窗只保留协议和作用域说明，不出现第二个模式选择入口。
 
 ### 12.2 事件契约
 
@@ -710,7 +710,7 @@ index.html 在导航后、conversation 与 trace-view 之前新增 `section.mode
 
 | type | data 的固定关键字段 |
 | --- | --- |
-| run_started | requestId、mode、modeLocked=true |
+| run_started | requestId、mode |
 | phase | phase、status、stepId、revision |
 | plan | mode、revision、plan（模式专属类型） |
 | evidence | Evidence 本身 |
@@ -727,7 +727,7 @@ index.html 在导航后、conversation 与 trace-view 之前新增 `section.mode
 传输示例；UUID 与内容为固定夹具：
 
 ```json
-{"requestId":"00000000-0000-4000-8000-000000000001","type":"run_started","data":{"mode":"REWOO","modeLocked":true}}
+{"requestId":"00000000-0000-4000-8000-000000000001","type":"run_started","data":{"mode":"REWOO"}}
 {"requestId":"00000000-0000-4000-8000-000000000001","type":"text","data":"结果是 46。"}
 {"requestId":"00000000-0000-4000-8000-000000000001","type":"done","data":""}
 ```
@@ -752,7 +752,7 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 | core/react/ReActRunner.java | 新增 | 对话历史、内核调用、合法检查点、RunResult |
 | core/rewoo/ | 新增 | RewooRunner、Plan/Step/ValidatedPlan、Planner、Parser、Validator、Binder、Solver |
 | core/planexecute/ | 新增 | PlanExecuteRunner、GoalPlan/Step、StepResult、Ledger、Planner、Validator、StepExecutor、Replanner、四种 Decision、Finalizer |
-| app/chat/AgentSessions.java | 修改 | 单 runner、模式原子绑定、accept/execute/status、RunLease |
+| app/chat/AgentSessions.java | 修改 | 共享会话摘要、逐轮选择 Runner、accept/execute/status、RunLease |
 | app/chat/ChatController.java | 修改 | 新请求 DTO、状态接口、run_started、终态与异步清理 |
 | app/chat/RunLease.java / AgentRunInterceptor.java | 新增 | 接受/运行/关闭生命周期与取消 |
 | app/chat/BrowserApproval.java | 修改 | 实现 ApprovalGateway；绑定 requestId、超时受剩余时间限制 |
@@ -765,9 +765,9 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 | deepseek/model/ChatRequest.java | 修改 | forModel、无工具字段省略、输出参数 |
 | model/ 与 deepseek/model/ | 分离共享契约和协议 DTO | AssistantTurn、ChatMessage、TokenUsage 等由各模式共用；ChatRequest、ChatChunk、ProviderUsage 保留在协议包 |
 | core/runtime/TraceEvent.java | 修改 | 作用域、实际错误状态和模型计数 |
-| static/index.html / app.css / app.js | 修改 | 对话框上方独立模式栏、新对话三选一与原位只读展示、计划卡、状态恢复 |
+| static/index.html / app.css / app.js | 修改 | 对话框上方独立模式栏、每轮三选一与运行中原位只读展示、计划卡、状态恢复 |
 | static/conversation-state.js | 新增 | 纯状态转换与事件归属检查 |
-| static/trace.js | 修改 | revision、步骤关联、按实际状态/计数展示 |
+| static/trace.js | 修改 | 每轮 mode、revision、步骤关联、按实际状态/计数展示 |
 | prompts/ 下 7 个文本文件 | 新增 | rewoo-planner、rewoo-solver、json-repair；goal-planner、step-executor、replanner、plan-finalizer，均以 .txt 结尾 |
 | README 与 docs/01–06 | 随实现更新 | 只描述已经实现并验收的行为 |
 
@@ -777,7 +777,7 @@ Java 路径前缀为 `src/main/java/dev/learning/agent/`，测试对应 `src/tes
 
 ## 14. 分步实施、测试与验收
 
-T1–T5 的代码与本地测试已完成；T6 已完成三模式 × 三协议 × Off/Low 的 18 组真实算术样例，并完成 Chromium 页面验证。计数、耗时、usage 和范围限制见[实施验证](agent-execution-research.md#实施后验证2026-11-01)。下表保留原实施拆分，便于按提交阅读。
+2026-11-02 的逐轮模式切换、共享记忆和浏览器验收见[追加验证](agent-execution-research.md#逐轮模式与共享记忆验证2026-11-02)。T1–T5 的代码与本地测试已完成；T6 初版已完成三模式 × 三协议 × Off/Low 的 18 组真实算术样例，并完成 Chromium 页面验证。计数、耗时、usage 和范围限制见[实施验证](agent-execution-research.md#实施后验证2026-11-01)。下表保留原实施拆分，便于按提交阅读。
 
 具体实现用 `ModelJson` 共用纯 JSON 请求与一次格式修复，`GoalPlans` 合并 P&E 的解析、图校验及决策解码；Planner/Replanner/Finalizer 的单次请求由 Runner 调用这些函数，不另建只有转发方法的包装类。逻辑职责仍按第 8–9 节划分。
 
@@ -787,13 +787,13 @@ T1–T5 的代码与本地测试已完成；T6 已完成三模式 × 三协议 �
 | T2：原子迁移 ReAct 主链 | 新 ChatModel 与工具接口、三个客户端、ReActEngine/Runner、现有 Session 的最小 ReAct 适配 | AgentLoopTest 迁为 ReActRunnerTest，并增加 EngineBoundaryTest；协议/工具测试同步迁移，覆盖两次拒绝、非零退出、超时与历史检查点；整个项目编译通过 |
 | T3：ReWOO | 计划、校验、绑定、串行 Worker、Solver | RewooRunnerTest：乱序、环、缺引用、E1/E10、失败分支与独立分支、格式修复上限 |
 | T4：P&E | 高层计划、步骤、review、修订、最终汇总 | PlanExecuteRunnerTest：正常继续、有界修订、保留成功证据、拒绝提前完成、跨版本预算不重置 |
-| T5：对话与前端 | mode 绑定、RunLease、状态接口、计划显示 | ChatControllerTest、RunLeaseTest、BrowserApprovalTest；Node 状态测试；三模式新对话选择与锁定的浏览器验收 |
+| T5：对话与前端 | 逐轮 mode、共享记忆、RunLease、状态接口、计划显示 | SessionModesTest、ChatControllerTest、RunLeaseTest、BrowserApprovalTest；Node 状态测试与逐轮切换验收 |
 | T6：真实矩阵 | 三模式 × 三协议，Off/非 Off | 相同任务与完成标准记录质量、调用、工具执行、耗时与实际 usage；未覆盖组合明确列出 |
 
 新增关键断言：
 
-- 首条请求校验失败不锁；接受后模型失败仍锁；缺省 mode 复用绑定；冲突 mode 409。
-- 模式栏位于导航下方、对话框上方；选择与锁定后展示不换位置；对话/轨迹切换时保持可见，消息输入区没有重复模式控件。
+- 空闲时六个方向的模式切换均可接受；切回旧模式包含中间问答；缺省 mode 沿用最近值；任何并发请求都 409。
+- 模式栏位于导航下方、对话框上方；选择与运行中只读展示不换位置；对话/轨迹切换时保持可见，消息输入区没有重复模式控件。
 - 并发首条请求至多一个成功；异步任务未启动就取消也能释放；执行未退出前不得释放锁。
 - A 已结束、B 已开始后再触发 A 的延迟取消/释放回调，B 的输出通道、确认状态和执行占用仍保持有效；重复回调不会重复清理。
 - 模型返回三个调用而局部只允许两个，第三个得到明确 SKIPPED，下一次请求没有未配对调用。
@@ -820,6 +820,6 @@ node --test src/test/js/*.test.js
 
 ## 15. 交付边界与待实测项
 
-接口、模式锁定、串行调度、局部/全局预算、取消资源和测试映射由本文确定。真实模型能否稳定输出合法计划、步骤完成判断的质量、token 与端到端成本必须通过 T6 验证。
+接口、逐轮模式与共享记忆、串行调度、局部/全局预算、取消资源和测试映射由本文确定。真实模型能否稳定输出合法计划、步骤完成判断的质量、token 与端到端成本必须通过 T6 验证。
 
 三模式在固定模型下各有代价，P&E 可以因步骤内与执行后调用更多而更慢、更贵；验收只在相同完成标准下比较。本轮 18 组只使用相同的两步算术任务。搜索质量、Bash 真实交互、开放式复杂任务与稳定性统计仍需扩展，不能据此推断普遍质量或成本优势。

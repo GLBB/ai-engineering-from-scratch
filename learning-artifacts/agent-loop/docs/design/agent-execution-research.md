@@ -2,7 +2,7 @@
 
 研究日期：2026-11-01（Asia/Shanghai） · [三模式技术方案](agent-execution-technical-design.md)
 
-目的：确认现有 Java demo 怎样扩展为三种新对话执行模式，识别真正需要改动的边界。本文保存文献结论、当前代码事实和离线实测；实施接口与行为统一以[技术方案](agent-execution-technical-design.md)为准。
+目的：确认现有 Java demo 怎样扩展为三种新对话执行模式，识别真正需要改动的边界。本文按日期保存文献结论、代码事实和实测；2026-11-01 记录中的会话永久锁定已由文末 2026-11-02 的逐轮模式选择替代；实施接口与行为统一以[技术方案](agent-execution-technical-design.md)为准。
 
 ## 1. 查阅的一手资料
 
@@ -171,3 +171,17 @@ P&E 不再通过 RewooPlanParser 读取字符串数组；两者改用 StrictJson
 本轮验证：`mvn clean package` 通过 91 项 Java 测试，其中包括 4 项 PackageStructureTest；`node --test src/test/js/*.test.js` 通过 6 项前端状态测试。文档本地链接检查无失效目标。打包后的应用使用占位凭据启动，通过会话创建、三模式目录、状态查询、无效请求不锁定模式和静态页面检查，随后停止验证进程。
 
 上节 18 组真实 API 和浏览器检查是功能实施时的记录；本轮分包验证没有发送模型请求，也没有重复执行该远程矩阵。
+
+
+## 逐轮模式与共享记忆验证（2026-11-02）
+
+Session 现可逐轮选择模式，RunLease 仅固定已接受的本轮 mode；同一会话仍串行。Session 保存有界共享问答、结果状态及工具尝试摘要，切换时创建新 Runner，切回旧模式也带上中间问答。连续同模式继续保留原 Runner 的历史。旧计划、原生工具往返、EvidenceStore 和确认不跨模式迁移。
+
+- `mvn package -q` 通过：129 项 Java 测试，0 失败 / 错误 / 跳过。新增 SessionModesTest 覆盖六个方向的切换、切回原模式、原生历史边界、工具失败后的摘要、真实工具分支产生的 NEEDS_INPUT（天气 provider 使用本地 fixture）以及跨 Session 隔离与有界记忆。
+- `node --test src/test/js/*.test.js` 通过：10 项。运行中不可改 mode、空闲后恢复选择、状态轮询保留下一轮选择、丢失 run_started 后恢复与过期事件检查均通过。
+- `python3 experiments/session_mode_switch.py` 真实接口通过 **12/12**：三个协议分别在同一 Session 连续执行 REACT → REWOO → PLAN_EXECUTE → REACT。先记录一个练习代号，在第二轮改为新值，第三、四轮能正确回答最新值；均为 COMPLETE、无工具尝试、结束后 running=false。模型 deepseek-flash、reasoning off；本次没有验证其他模型 / 推理等级，也没有重跑旧的 18 组算术矩阵。
+- Chromium 通过相同四轮的真实浏览器请求：Session ID 不变，每轮运行中原位只读，结束恢复下拉选择；回答标签与轨迹标题分别保留本轮模式。受控 HTTP 400 后仍可选择；新建对话清空消息并保留偏好；390px 视口无水平溢出，应用 JavaScript 异常为 0。
+
+本次真实运行也验证并修正两处上下文处理：规划模式明确允许使用对话中的事实 / 偏好，不把会话内确认当成外部系统写入；没有当前证据时不能编造 E 引用。切回 ReAct 的历史回答按普通 assistant 消息重建。对 DeepSeek Chat 的受控差分请求确认，`tool_calls: []` 返回 HTTP 400，省略该字段返回 HTTP 200；重建历史现已省略它。
+
+完整受控输入、NDJSON、结果及浏览器检查摘要保存在忽略目录 `target/session-mode-switch/`，不提交凭据或原始会话访问 ID。浏览器环境缺少中文字体，截图中文字显示受限；DOM 中文、模式标签与交互断言已验证。上述真实请求是功能样例，不构成稳定性统计、语义质量保证或成本基准。这一节记录模式切换功能验证，当时尚未接入 OTel。随后完成的 Trace 接入与真实回读见 [Trace 实施记录](observability-trace-implementation-plan.md#11-实施与验收2026-11-02)。

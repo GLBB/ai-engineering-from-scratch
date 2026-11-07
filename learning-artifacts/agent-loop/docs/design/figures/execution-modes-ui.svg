@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="960" viewBox="0 0 1280 960" role="img" aria-labelledby="title desc">
   <title id="title">ReAct、ReWOO 与 Plan-and-Execute 模式选择界面方案</title>
-  <desc id="desc">三模式技术方案的界面附件。左侧在对话框上方设置独立模式栏，已开始的 ReWOO 对话原位显示只读模式，底部输入区只有模型、推理等级和发送。右侧为设置弹窗与新对话的三种模式选项。并非运行截图。</desc>
+  <desc id="desc">三模式技术方案的界面附件。左侧在对话框上方设置独立模式栏，运行中的 ReWOO 请求原位显示只读模式，底部输入区只有模型、推理等级和发送。右侧为设置弹窗与每轮发送前的三种模式选项。并非运行截图。</desc>
   <defs>
     <style>
       text { font-family: system-ui, -apple-system, 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; fill: #213044; }
@@ -16,7 +16,7 @@
   </defs>
   <rect width="1280" height="960" fill="#f2f5fa"/>
   <text x="40" y="46" class="title">三种执行模式的界面设计</text>
-  <text x="40" y="75" class="body muted">设计示意 · 尚未实现 · 2026-11-01</text>
+  <text x="40" y="75" class="body muted">设计示意 · 每轮可选模式 · 2026-11-02</text>
 
   <rect x="32" y="104" width="790" height="812" rx="18" fill="white" stroke="#d8e0eb"/>
   <rect x="32" y="104" width="790" height="62" rx="18" fill="#f9fbfe"/>
@@ -31,8 +31,8 @@
   <rect x="54" y="229" width="742" height="43" rx="9" fill="#f8fafc" stroke="#d8e0eb"/>
   <text x="70" y="256" class="body">执行模式</text>
   <rect x="164" y="235" width="155" height="30" rx="7" fill="#edf3ff"/>
-  <text x="177" y="256" class="small blue">ReWOO · 已固定</text>
-  <text x="337" y="256" class="small muted">新对话首次发送前可选，开始后只读展示</text>
+  <text x="177" y="256" class="small blue">ReWOO · 本轮执行中</text>
+  <text x="337" y="256" class="small muted">每条消息发送前可选，执行中只读展示</text>
 
   <g id="conversation-content" transform="translate(0,41)">
   <rect x="240" y="239" width="554" height="66" rx="12" fill="#edf3ff"/>
@@ -73,7 +73,7 @@
   <text x="351" y="823" class="body">Off</text>
   <rect x="730" y="795" width="45" height="43" rx="10" fill="#245cba"/>
   <path d="M752 826 v-20 m-7 7 7 -7 7 7" fill="none" stroke="white" stroke-width="2"/>
-  <text x="58" y="889" class="small muted">本对话的模式已固定。需要更改执行模式时，请新建对话。</text>
+  <text x="58" y="889" class="small muted">本轮执行中。结束后可在此处选择下一轮的执行模式。</text>
 
   <rect x="850" y="104" width="398" height="363" rx="18" fill="white" stroke="#d8e0eb"/>
   <text x="874" y="143" class="heading">设置弹窗</text>
@@ -83,19 +83,19 @@
   <text x="874" y="272" class="small muted">API 对接方式保存后，重启应用生效。</text>
   <text x="874" y="310" class="body">执行模式在对话框上方选择与展示。</text>
   <text x="874" y="337" class="body">模型与推理等级可每轮调整。</text>
-  <text x="874" y="365" class="small muted">开始对话后，当前模式只读展示。</text>
+  <text x="874" y="365" class="small muted">本轮执行中只读，结束后恢复选择。</text>
   <rect x="1098" y="402" width="124" height="41" rx="8" fill="#245cba"/>
   <text x="1125" y="429" class="body" style="fill:white">保存设置</text>
 
   <rect x="850" y="490" width="398" height="282" rx="18" fill="#edf3ff" stroke="#d5e3fa"/>
-  <text x="874" y="527" class="heading">对话框上方：新对话可选</text>
+  <text x="874" y="527" class="heading">对话框上方：每轮可选</text>
   <text x="874" y="563" class="body blue">ReAct</text>
   <text x="874" y="587" class="body">根据每一步的结果决定下一步</text>
   <text x="874" y="618" class="body blue">ReWOO</text>
   <text x="874" y="642" class="body">先生成完整计划，执行取证后汇总</text>
   <text x="874" y="673" class="body blue">Plan-and-Execute</text>
   <text x="874" y="697" class="body">先拆解目标，逐步执行并调整计划</text>
-  <text x="874" y="744" class="small muted">首条消息被接受后，模式固定。</text>
+  <text x="874" y="744" class="small muted">每轮发送前可选，运行中只读。</text>
 
   <rect x="850" y="794" width="398" height="122" rx="18" fill="white" stroke="#d8e0eb"/>
   <text x="874" y="826" class="heading">计划与执行可追踪</text>

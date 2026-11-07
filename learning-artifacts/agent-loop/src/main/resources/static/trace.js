@@ -11,6 +11,33 @@ const traceView = (() => {
   const turnTimes = new Map();
   const openSteps = new Set();
   const results = new Map();
+  const correlations = new Map();
+  const modeNames = { REACT: 'ReAct', REWOO: 'ReWOO', PLAN_EXECUTE: 'Plan-and-Execute' };
+
+  function turnHeading(turnNumber, steps) {
+    const mode = [...steps.values()].find(step => step.mode)?.mode;
+    return `第 ${turnNumber} 轮${mode ? ' · ' + (modeNames[mode] || mode) : ''}`;
+  }
+  function reference(data) {
+    if (!/^[a-f0-9]{32}$/.test(data.traceId || '')) return null;
+    const box = document.createElement('div');
+    box.className = 'trace-reference';
+    let url;
+    try { url = new URL(data.traceUrl); } catch (_) { /* ID is useful without a configured project URL. */ }
+    if (url && ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) {
+      const link = document.createElement('a');
+      link.textContent = '在 Langfuse 查看本轮 Trace';
+      link.href = url.href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      box.append(link);
+    }
+    const id = document.createElement('code');
+    id.textContent = `traceId: ${data.traceId}`;
+    box.append(id);
+    return box;
+  }
+  function started(turnNumber, data) { correlations.set(turnNumber, data); render(); }
 
   function formatDuration(milliseconds) {
     if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
@@ -98,7 +125,7 @@ const traceView = (() => {
       group.className = 'timeline-group';
       const heading = document.createElement('div');
       heading.className = 'timeline-heading';
-      heading.textContent = `第 ${turnNumber} 轮`;
+      heading.textContent = turnHeading(turnNumber, steps);
       group.append(heading);
 
       for (const [kind, label] of [['user', '输入'], ['model', '模型'], ['tool', '工具']]) {
@@ -208,8 +235,10 @@ const traceView = (() => {
       if (matching.length === 0) continue;
       const heading = document.createElement('h2');
       heading.className = 'trace-turn-heading';
-      heading.textContent = `第 ${turnNumber} 轮`;
+      heading.textContent = turnHeading(turnNumber, steps);
       eventRoot.append(heading);
+      const link = reference(correlations.get(turnNumber) || {});
+      if (link) eventRoot.append(link);
       const firstAt = Math.min(...[...steps.values()].map(step => step.startedAtMs));
       for (const step of matching) {
         eventRoot.append(renderStep(step, firstAt));
@@ -241,8 +270,8 @@ const traceView = (() => {
   }, 500);
 
   function reset() {
-    stepsByTurn.clear(); turnTimes.clear(); openSteps.clear(); results.clear(); searchInput.value = ''; render();
+    stepsByTurn.clear(); turnTimes.clear(); openSteps.clear(); results.clear(); correlations.clear(); searchInput.value = ''; render();
   }
   function result(turnNumber, data) { results.set(turnNumber, data); render(); }
-  return { show, beginTurn, finishTurn, record, recordError, reset, result };
+  return { show, beginTurn, finishTurn, record, recordError, reset, result, started, reference };
 })();

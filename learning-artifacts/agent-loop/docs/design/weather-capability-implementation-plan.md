@@ -254,8 +254,8 @@ ToolRegistry 增加 decode(name, arguments) 和 names()；ToolExecutionService.a
 - 本轮出现未解决的 NEEDS_INPUT 时，不自动更换城市或重试候选。ReAct 不再执行本批剩余调用，补齐 SKIPPED 配对结果，随后只允许一次无工具模型回复；若没有模型额度，宿主使用固定模板展示候选。
 - ReWOO 记录本节点及依赖跳过，停止后续 Worker，将已有证据交给预留 Solver。P&E 在该步骤后进入终结，不再 review/revise，使用预留 Finalizer。
 - 最终结果为 NEEDS_INPUT，可同时说明本轮已经查到的其他事实，但不标为整个天气任务完成。Controller 发 run_result 后正常 done，不能追加“运行异常”。
-- 问答记忆保留本轮问题与澄清回复；下一条用户消息是新请求，在同一固定模式下重新规划和查询，不恢复旧计划、预算或原始证据。
-- RunLease 完成清理后释放占用；模式仍锁定。已有正常工具错误、硬取消和基础设施异常继续走既有路径。
+- 问答记忆保留本轮问题与澄清回复；下一条用户消息是新请求，可以沿用或切换执行模式，根据共享对话上下文重新规划和查询，不恢复旧计划、预算或原始证据。
+- RunLease 完成清理后释放占用；下一条消息恢复模式选择。已有正常工具错误、硬取消和基础设施异常继续走既有路径。
 
 该状态是通用的“工具需要用户补充信息”，Runner 只识别通用状态，不检查 WEATHER、城市名或供应商响应。并发、取消和传输规则继续由[三模式方案](agent-execution-technical-design.md)管理。
 
@@ -289,7 +289,7 @@ ToolResult 增加 `List<ToolSource>`，ToolSource 包含 label 和 url；保留�
 
 前端根据 Evidence.result.sources 渲染通用来源链接，不解析天气 JSON、不按天气工具名称写分支。对同一回答去重，至少展示 Open-Meteo 天气来源与 GeoNames 地点来源；链接只允许 HTTPS，通过 textContent 显示标签。这样最终模型未主动写出来源时，页面仍有明确归属。[地点数据来源](https://open-meteo.com/en/docs/geocoding-api#attribution)
 
-不增加天气模式、供应商设置或天气专用输入表单，既有执行模式栏位置和锁定规则不变。
+不增加天气模式、供应商设置或天气专用输入表单。执行模式栏仍在对话框上方，每轮发送前可选、运行中只读；该规则由通用会话功能管理。
 
 ## 10. 文件改造与实施顺序
 
@@ -403,7 +403,7 @@ Anthropic / ReAct / current 首次天气工具调用 TIMEOUT，随后模型发�
 
 ### 浏览器验证
 
-Chromium 实际操作通过：ReWOO 七日预报、两条独立来源链接、模式锁定；新对话切为 ReAct，对未指定 admin1 的北京查询返回 NEEDS_INPUT，页面恢复输入；补充“我指北京市”后成功取得当前天气。来源按回答独立展示，同一回答去重。390px 视口无水平溢出，未出现应用 JavaScript 异常。截图位于忽略目录 target/weather-browser/；验证容器缺少中文字体，截图中文显示为缺字，DOM 中文内容与交互断言通过。
+以下为天气初版验证；会话永久锁定已在 2026-11-02 改为逐轮选择，当前规则见三模式方案。Chromium 当时实际操作通过：ReWOO 七日预报、两条独立来源链接、模式锁定；新对话切为 ReAct，对未指定 admin1 的北京查询返回 NEEDS_INPUT，页面恢复输入；补充“我指北京市”后成功取得当前天气。来源按回答独立展示，同一回答去重。390px 视口无水平溢出，未出现应用 JavaScript 异常。截图位于忽略目录 target/weather-browser/；验证容器缺少中文字体，截图中文显示为缺字，DOM 中文内容与交互断言通过。
 
 ### 复现
 

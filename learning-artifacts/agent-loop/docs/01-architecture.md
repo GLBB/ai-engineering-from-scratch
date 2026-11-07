@@ -18,6 +18,8 @@ flowchart LR
     App --> Strategies[core.react / rewoo / planexecute]
     App --> Runtime[core.runtime：本轮资源与事件]
     Strategies --> Runtime
+    Observability[observability：OTel 适配] -->|实现观测接口| Runtime
+    Observability -->|OTLP HTTP| Langfuse[Langfuse：执行树与用量]
     Strategies --> Model[model：模型调用契约与 Gateway]
     Strategies --> Tools[tool：参数、分发与具体工具]
     Provider[deepseek：协议适配] -->|实现 ChatModel| Model
@@ -44,6 +46,7 @@ flowchart LR
 | [model](../src/main/java/dev/learning/agent/model/) | 共用模型契约与带预算、轨迹的调用 Gateway。 | [ChatModel](../src/main/java/dev/learning/agent/model/ChatModel.java) |
 | [deepseek](../src/main/java/dev/learning/agent/deepseek/) | HTTP 报文与 SSE 适配，协议 DTO 留在其 model 子包。 | [ChatCompletionsClient](../src/main/java/dev/learning/agent/deepseek/ChatCompletionsClient.java) |
 | [tool](../src/main/java/dev/learning/agent/tool/) | 工具类型、参数解码、分发、执行和结果记录。 | [DefaultToolExecutionService](../src/main/java/dev/learning/agent/tool/DefaultToolExecutionService.java) |
+| [observability](../src/main/java/dev/learning/agent/observability/) | OTel SDK、字段映射、内容过滤和用量归一化。 | [OtelRunTelemetry](../src/main/java/dev/learning/agent/observability/OtelRunTelemetry.java) |
 | [support/json](../src/main/java/dev/learning/agent/support/json/) | 通用严格 JSON 操作。 | [StrictJson](../src/main/java/dev/learning/agent/support/json/StrictJson.java) |
 | [static](../src/main/resources/static/) | 页面、交互、模式状态与轨迹。 | [app.js](../src/main/resources/static/app.js) |
 
@@ -61,10 +64,14 @@ flowchart LR
 
 `RunLease` 留在 `app.chat`，因为它直接协调 HTTP 异步执行、EventSink 与 BrowserApproval。核心仍通过 ApprovalGateway 获取确认结果，无需了解浏览器交互。
 
+`core.runtime` 定义 RunTelemetry / TraceSpan / ExternalObserver / TelemetryFactory，默认 Noop。`observability` 实现这些接口并持有 OTel SDK；Runner、Gateway 和工具描述运行事实，不导入 SDK 或 Langfuse 类型。天气服务只注入 ExternalObserver，既不知道 Session，也不依赖 Agent 的完整 RunContext。RunLease 接受请求时创建根，工作线程临时激活 Context，所有子操作结束并完成清理后关闭根。
+
+每轮一个 trace，同一 Session 共用不可用于访问 API 的观测 ID；访问凭据不导出。页面实时轨迹继续通过 NDJSON 更新，Langfuse 用于持久查询；两者通过 requestId / traceId 对照。具体树形及源码入口见 [Trace 阅读指南](07-reading-agent-traces.md)。
+
 ## 进程中保存了什么
 
-启动时，[SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) 读取协议设置，[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) 根据这个设置创建协议客户端。每次页面请求 `/api/session`，服务端创建一个新会话；首条请求接受时为会话创建一个固定模式的 Runner，持有独立历史。每个已接受请求拥有自己的 RunLease、事件通道、确认和 RunContext，Session 在它清理完成前拒绝其他请求。
+启动时，[SettingsStore](../src/main/java/dev/learning/agent/app/settings/SettingsStore.java) 读取协议设置，[AgentSessions](../src/main/java/dev/learning/agent/app/chat/AgentSessions.java) 根据这个设置创建协议客户端。每次页面请求 `/api/session`，服务端创建一个新会话，持有独立共享记忆。每条请求可以选择模式；连续同模式复用 Runner，切换时基于共享问答与状态摘要新建 Runner。每个已接受请求拥有自己的 RunLease、事件通道、确认和 RunContext，Session 在它清理完成前拒绝其他请求。
 
-消息历史在服务端内存中。页面刷新会请求新会话，重启进程后会话消失；目前没有会话持久化；ReAct 历史不自动裁剪，ReWOO/P&E 仅保留有限的已完成问答。模型和推理等级每次发送消息时由页面提交，API 协议在进程启动时确定。
+消息历史在服务端内存中。页面刷新会请求新会话，重启进程后会话消失；目前没有会话持久化。连续 ReAct 的完整历史不自动裁剪，跨模式共享记忆和规划模式历史有 4 轮 / 约 24,000 字符上限。模式、模型和推理等级每次发送消息时由页面提交，API 协议在进程启动时确定。
 
 下一步沿着实际调用顺序看：[一次对话如何运行](02-agent-loop.md)。
