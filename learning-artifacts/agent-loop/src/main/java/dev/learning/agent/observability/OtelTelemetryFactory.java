@@ -20,7 +20,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -61,44 +60,80 @@ public final class OtelTelemetryFactory implements TelemetryFactory {
         this.content = content; this.baseUrl = baseUrl; this.projectId = projectId;
         this.release = release; this.ownedProvider = ownedProvider;
     }
-    public static TelemetryFactory fromEnvironment(Map<String, String> env) {
-        String enabled = env.getOrDefault("AGENT_TRACING_ENABLED", "false");
-        if (!Set.of("true", "false").contains(enabled)) throw new IllegalArgumentException("AGENT_TRACING_ENABLED must be true or false");
-        if (!Boolean.parseBoolean(enabled)) return TelemetryFactory.NOOP;
-        String base = env.getOrDefault("LANGFUSE_BASE_URL", "http://127.0.0.1:3035").replaceAll("/+$", "");
-        URI endpoint;
-        try { endpoint = URI.create(base); } catch (IllegalArgumentException error) { throw new IllegalArgumentException("Invalid LANGFUSE_BASE_URL"); }
-        boolean loopback = Set.of("localhost", "127.0.0.1", "[::1]", "::1").contains(String.valueOf(endpoint.getHost()));
-        if (endpoint.getHost() == null || endpoint.getUserInfo() != null || endpoint.getQuery() != null || endpoint.getFragment() != null
-                || !("https".equals(endpoint.getScheme()) || loopback && "http".equals(endpoint.getScheme())))
-            throw new IllegalArgumentException("LANGFUSE_BASE_URL requires HTTPS or loopback HTTP without credentials/query");
-        String content = env.getOrDefault("AGENT_TRACE_CONTENT", "metadata");
-        if (!Set.of("metadata", "learning").contains(content)) throw new IllegalArgumentException("AGENT_TRACE_CONTENT must be metadata or learning");
-        double ratio;
-        try { ratio = Double.parseDouble(env.getOrDefault("AGENT_TRACE_SAMPLE_RATIO", "1.0")); }
-        catch (NumberFormatException error) { throw new IllegalArgumentException("Invalid AGENT_TRACE_SAMPLE_RATIO"); }
-        if (!Double.isFinite(ratio) || ratio < 0 || ratio > 1) throw new IllegalArgumentException("AGENT_TRACE_SAMPLE_RATIO must be 0..1");
-        String auth = Base64.getEncoder().encodeToString((required(env, "LANGFUSE_PUBLIC_KEY") + ":"
-                + required(env, "LANGFUSE_SECRET_KEY")).getBytes(StandardCharsets.UTF_8));
-        var exporter = OtlpHttpSpanExporter.builder().setEndpoint(base + "/api/public/otel/v1/traces")
-                .addHeader("Authorization", "Basic " + auth).addHeader("x-langfuse-ingestion-version", "4")
-                .setTimeout(Duration.ofSeconds(5)).build();
-        var processor = BatchSpanProcessor.builder(exporter).setMaxQueueSize(2048).setMaxExportBatchSize(256)
-                .setScheduleDelay(Duration.ofSeconds(1)).setExporterTimeout(Duration.ofSeconds(5)).build();
-        var provider = SdkTracerProvider.builder().addSpanProcessor(processor)
-                .setResource(Resource.getDefault().merge(Resource.create(Attributes.builder()
-                        .put("service.name", "agent-loop-learning").put("service.version", env.getOrDefault("AGENT_RELEASE", "1.0-SNAPSHOT"))
-                        .put("deployment.environment.name", "local").build())))
-                .setSampler(Sampler.parentBased(Sampler.traceIdRatioBased(ratio))).build();
+
+    public static TelemetryFactory fromProperties(TracingProperties properties) {
+        if (!properties.enabled()) {
+            return TelemetryFactory.NOOP;
+        }
+
+        String base = validatedBaseUrl(properties.langfuse());
+        double ratio = properties.sampleRatio();
+        if (!Double.isFinite(ratio) || ratio < 0 || ratio > 1) {
+            throw new IllegalArgumentException("agent.tracing.sample-ratio must be 0..1");
+        }
+
+        String publicKey = required("agent.tracing.langfuse.public-key", properties.langfuse().publicKey());
+        String secretKey = required("agent.tracing.langfuse.secret-key", properties.langfuse().secretKey());
+        String credentials = publicKey + ":" + secretKey;
+        String auth = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+        var exporter = OtlpHttpSpanExporter.builder()
+                .setEndpoint(base + "/api/public/otel/v1/traces")
+                .addHeader("Authorization", "Basic " + auth)
+                .addHeader("x-langfuse-ingestion-version", "4")
+                .setTimeout(Duration.ofSeconds(5))
+                .build();
+        var processor = BatchSpanProcessor.builder(exporter)
+                .setMaxQueueSize(2048)
+                .setMaxExportBatchSize(256)
+                .setScheduleDelay(Duration.ofSeconds(1))
+                .setExporterTimeout(Duration.ofSeconds(5))
+                .build();
+        var resource = Resource.getDefault().merge(Resource.create(Attributes.builder()
+                .put("service.name", "agent-loop-learning")
+                .put("service.version", properties.release())
+                .put("deployment.environment.name", "local")
+                .build()));
+        var provider = SdkTracerProvider.builder()
+                .addSpanProcessor(processor)
+                .setResource(resource)
+                .setSampler(Sampler.parentBased(Sampler.traceIdRatioBased(ratio)))
+                .build();
         var sdk = OpenTelemetrySdk.builder().setTracerProvider(provider).build();
-        return new OtelTelemetryFactory(sdk, new TraceContentPolicy(content.equals("learning"), env), base,
-                env.get("LANGFUSE_PROJECT_ID"), env.getOrDefault("AGENT_RELEASE", "1.0-SNAPSHOT"), provider);
+        return new OtelTelemetryFactory(sdk, new TraceContentPolicy(), base,
+                properties.langfuse().projectId(), properties.release(), provider);
     }
-    private static String required(Map<String, String> env, String key) {
-        String value = env.get(key);
-        if (value == null || value.isBlank()) throw new IllegalArgumentException(key + " is required when tracing is enabled");
+
+    private static String validatedBaseUrl(TracingProperties.Langfuse settings) {
+        if (settings == null) {
+            throw new IllegalArgumentException("agent.tracing.langfuse.base-url is required when tracing is enabled");
+        }
+        String base = required("agent.tracing.langfuse.base-url", settings.baseUrl()).replaceAll("/+$", "");
+        URI endpoint;
+        try {
+            endpoint = URI.create(base);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("Invalid agent.tracing.langfuse.base-url");
+        }
+
+        boolean loopback = Set.of("localhost", "127.0.0.1", "[::1]", "::1")
+                .contains(String.valueOf(endpoint.getHost()));
+        boolean allowedScheme = "https".equals(endpoint.getScheme())
+                || loopback && "http".equals(endpoint.getScheme());
+        if (endpoint.getHost() == null || endpoint.getUserInfo() != null
+                || endpoint.getQuery() != null || endpoint.getFragment() != null || !allowedScheme) {
+            throw new IllegalArgumentException(
+                    "agent.tracing.langfuse.base-url requires HTTPS or loopback HTTP without credentials/query");
+        }
+        return base;
+    }
+
+    private static String required(String key, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(key + " is required when tracing is enabled");
+        }
         return value;
     }
+
     public RunTelemetry open(String session, ExecutionRequest request, AgentMode mode, String protocol) {
         return new OtelRunTelemetry(this, tracer, content, session, request, mode, protocol, release);
     }

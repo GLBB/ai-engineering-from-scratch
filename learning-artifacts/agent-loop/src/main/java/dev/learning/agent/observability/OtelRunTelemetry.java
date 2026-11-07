@@ -62,7 +62,6 @@ final class OtelRunTelemetry implements RunTelemetry {
         span.setAttribute("agent_loop.request.id", request.requestId().toString());
         span.setAttribute("agent_loop.mode", mode);
         span.setAttribute("agent_loop.protocol", protocol);
-        span.setAttribute("agent_loop.content.mode", content.mode());
         for (String prefix : List.of("langfuse.trace.metadata.", "langfuse.observation.metadata.")) {
             span.setAttribute(prefix + "mode", mode);
             span.setAttribute(prefix + "protocol", protocol);

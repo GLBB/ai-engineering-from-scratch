@@ -87,7 +87,7 @@ def run_protocol(protocol, port, directory, env_file):
     (directory / "config").mkdir(parents=True)
     (directory / "config/settings.json").write_text(json.dumps({"protocol": protocol}))
     env = dict(os.environ, **private)
-    env.update(AGENT_PORT=str(port), AGENT_TRACE_CONTENT="learning", AGENT_TRACE_SAMPLE_RATIO="1.0")
+    env.update(AGENT_PORT=str(port), AGENT_TRACING_ENABLED="true", AGENT_TRACE_SAMPLE_RATIO="1.0")
     jar = MODULE / "target/deepseek-agent-loop-1.0-SNAPSHOT.jar"
     rows = []
     with (OUTPUT / f"{protocol}.log").open("w") as log:

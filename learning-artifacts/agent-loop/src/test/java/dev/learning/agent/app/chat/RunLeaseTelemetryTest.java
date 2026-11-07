@@ -22,7 +22,7 @@ class RunLeaseTelemetryTest {
     private final InMemorySpanExporter exporter = InMemorySpanExporter.create();
     private final OpenTelemetrySdk sdk = OpenTelemetrySdk.builder().setTracerProvider(SdkTracerProvider.builder()
             .addSpanProcessor(SimpleSpanProcessor.create(exporter)).build()).build();
-    private final OtelTelemetryFactory factory = new OtelTelemetryFactory(sdk, new TraceContentPolicy(false, Map.of()),
+    private final OtelTelemetryFactory factory = new OtelTelemetryFactory(sdk, new TraceContentPolicy(),
             "http://127.0.0.1:3035", "test-project", "test");
     @AfterEach void close() { sdk.close(); }
     private AgentSessions.Session session(ChatModel model) {

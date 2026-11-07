@@ -150,7 +150,7 @@ flowchart TD
 3. **同名城市。** 使用确定性的同名地点 fixture 先验证 NEEDS_INPUT，再进行真实 API 练习；给出补充地点后确认新 trace 与旧 trace 共享 Session。
 4. **受控失败。** 用测试模型 / HTTP server 制造一次失败，指出失败发生在哪层，以及是否触发修复、跳过、后续模型决策或部分完成。
 
-每轮留下六项复盘记录即可：问题、mode / protocol、traceId、关键父子关系、调用与 Token 计数、结束原因。没有完整内容采集时结合浏览器的本地轨迹阅读；若开启 learning 预览，则先确认样本适合保存。
+每轮留下六项复盘记录即可：问题、mode / protocol、traceId、关键父子关系、调用与 Token 计数、结束原因。Trace 中的正文预览经过限长处理；需要完整内容时结合浏览器的本地轨迹阅读。
 
 第 10 节的 ID 均已通过本项目的独立 Langfuse key 回读；它们来自这个 Demo，不是 Codex 的 trace。你也可以通过方案中的 CLI 命令，重新查询对应 UTC 窗口和 traceId。
 
@@ -306,7 +306,7 @@ flowchart LR
 
 先打开 [ReAct：北京地点有歧义](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/eb819512adddf433746ffe3eee794fc8)，再打开 [ReWOO：补充北京市后成功](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/9bb0ca645cef4af544aaf3d5e4280e6e)。
 
-第一轮根为 NEEDS_INPUT，只有地点 GET，没有天气 GET，工具不是 ERROR。第二轮换为 ReWOO，明确 admin1=北京市后查询成功，有地点与预报两次 GET。两轮 traceId 不同、观测 Session ID 相同；证明 Session 保存对话上下文，执行模式属于本轮请求。这两条使用默认 metadata 模式，预览为空，需结合浏览器轨迹查看文字。
+第一轮根为 NEEDS_INPUT，只有地点 GET，没有天气 GET，工具不是 ERROR。第二轮换为 ReWOO，明确 admin1=北京市后查询成功，有地点与预报两次 GET。两轮 traceId 不同、观测 Session ID 相同；证明 Session 保存对话上下文，执行模式属于本轮请求。这两条历史 Trace 在当时仅采集元数据，预览为空，需结合浏览器轨迹查看文字；当前版本启用 Trace 后统一记录限长内容预览。
 
 也可以查看探索时的 [ReWOO：巴黎补充信息后仍失败](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/2c5eb5ed8f6a976ed6c9365039fed136)。仅补充国家仍有多个候选，Worker 返回 NEEDS_INPUT，但 Solver 引用了不可用于作答的待补证据，宿主校验拒绝，根为 FAILED。先看 WORK 的地点结果，再看 SOLVE 的 ERROR，就能区分“天气服务网络失败”与“模型引用不合法”。Trace 帮助定位失败，不能保证模型正确处理每一种地点补充。
 
@@ -316,11 +316,9 @@ flowchart LR
 
 ```bash
 ./run-with-tracing.sh
-# 明确需要保存受控问题 / 回答预览时：
-AGENT_TRACE_CONTENT=learning ./run-with-tracing.sh
 ```
 
-页面对话和轨迹中点击“在 Langfuse 查看本轮 Trace”。根的 IO 是整轮入口，generation 的 IO 是消息数量、结束原因等摘要，learning 模式额外附脱敏限长预览。完整历史、系统提示词、reasoning、Bash 和搜索正文不导出。模型实际返回的 reasoning 仍可在网页本地轨迹查看。
+页面对话和轨迹中点击“在 Langfuse 查看本轮 Trace”。配置入口是 `src/main/resources/application.yml` 的 `agent.tracing`，包含开关、Langfuse 地址、项目 ID、采样率和版本。根的 IO 是整轮入口，generation 的 IO 是消息数量、结束原因等摘要；启用 Trace 后统一附限长内容预览，不再切换内容模式。完整历史、系统提示词、reasoning、Bash 和搜索正文不导出。模型实际返回的 reasoning 仍可在网页本地轨迹查看。
 
 | 阅读问题 | 代码入口 |
 | --- | --- |

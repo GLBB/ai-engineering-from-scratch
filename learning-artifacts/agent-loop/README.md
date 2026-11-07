@@ -56,21 +56,23 @@ mvn spring-boot:run
 ./run-with-tracing.sh
 ```
 
-普通 `mvn spring-boot:run` 默认关闭 tracing。脚本加载私有配置并启动应用；其他机器可用 `AGENT_TRACE_ENV_FILE` 指定自己的环境文件。开启后每轮回答与轨迹摘要显示 Trace 链接，跳转本机 Langfuse 查看执行树。同一对话可以逐轮切换执行模式，每轮独立建 trace，通过观测 Session ID 分组。
+Trace 默认开启；启动前需要提供 Langfuse 凭据。脚本加载私有配置并启动应用；其他机器可用 `AGENT_TRACE_ENV_FILE` 指定自己的环境文件。开启后每轮回答与轨迹摘要显示 Trace 链接，跳转本机 Langfuse 查看执行树。同一对话可以逐轮切换执行模式，每轮独立建 trace，通过观测 Session ID 分组。
 
-| 环境变量 | 用途 |
-| --- | --- |
-| `AGENT_TRACING_ENABLED` | `true` 开启；默认 `false`，关闭时使用 Noop。 |
-| `LANGFUSE_BASE_URL` | 默认 `http://127.0.0.1:3035`；远程地址须 HTTPS。 |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | 开启时必填，使用本项目 key。 |
-| `LANGFUSE_PROJECT_ID` | 用于生成页面链接；未设置时仍显示 traceId。 |
-| `AGENT_TRACE_CONTENT` | 默认 `metadata`；`learning` 额外保存脱敏限长的教学预览。 |
-| `AGENT_TRACE_SAMPLE_RATIO` | 默认 `1.0`，范围 `0–1`。 |
-| `AGENT_RELEASE` | 构建版本标识，默认 `1.0-SNAPSHOT`。 |
+Trace 配置集中在 [`application.yml`](src/main/resources/application.yml) 的 `agent.tracing` 下，由 Spring 绑定到 `TracingProperties`。可以直接修改 YAML，也可以使用 Spring 命令行参数覆盖，例如 `--agent.tracing.enabled=true`；表中的环境变量由 YAML 占位符读取。
 
-默认只保存结构、状态、计数、Token 和安全摘要。需要对照受控练习的文字时运行 `AGENT_TRACE_CONTENT=learning ./run-with-tracing.sh`。两种模式都不上传完整提示词、历史、reasoning 或 Bash 原文；涉及 Bash 后，该 Session 后续自由文本预览关闭。网页本地轨迹依然能显示模型实际返回的思考内容。
+| YAML 配置 | 默认值 / 用途 | 环境变量覆盖 |
+| --- | --- | --- |
+| `agent.tracing.enabled` | `true`；开启时初始化 SDK，关闭时使用 Noop。 | `AGENT_TRACING_ENABLED` |
+| `agent.tracing.langfuse.base-url` | `http://127.0.0.1:3035`；远程地址须 HTTPS。 | `LANGFUSE_BASE_URL` |
+| `agent.tracing.langfuse.project-id` | 可选，用于生成页面链接；未设置时仍显示 traceId。 | `LANGFUSE_PROJECT_ID` |
+| `agent.tracing.sample-ratio` | `1.0`，范围 `0–1`。 | `AGENT_TRACE_SAMPLE_RATIO` |
+| `agent.tracing.release` | `1.0-SNAPSHOT`，构建版本标识。 | `AGENT_RELEASE` |
 
-三协议 × 三模式 × 计算 / 天气的 **18 组真实运行均已写入并回读 Langfuse**；Java 147 项、前端 10 项测试通过。复现使用 `mvn package` 后运行 `python3 experiments/trace_verification.py`，该脚本会真实调用模型和天气 API，并以 learning 模式保存受控样本。可读案例见 [Trace 阅读指南](docs/07-reading-agent-traces.md#10-用真实-trace-复盘)。
+`agent.tracing.langfuse.public-key` / `secret-key` 在 YAML 中使用 `${LANGFUSE_PUBLIC_KEY:}` / `${LANGFUSE_SECRET_KEY:}` 占位符。启动脚本加载仓库外的私有环境文件，Spring 解析占位符并绑定配置；开启 Trace 时两项必填，真实密钥不写入仓库。
+
+开启 Trace 后统一保存结构、状态、计数、Token，以及当前问题、模型文本输出、calculator / weather 参数与结果、步骤摘要和最终回答的限长内容预览。每个预览上限约 4 KiB；不做脱敏替换，不再区分内容模式。完整提示词、历史、reasoning、Bash 和搜索正文仍不导出；涉及 Bash 后，该 Session 后续自由文本预览关闭。网页本地轨迹依然能显示模型实际返回的思考内容。
+
+2026-11-02 完成三协议 × 三模式 × 计算 / 天气的 **18 组真实运行并回读 Langfuse**。2026-11-07 配置迁移回归通过 161 项 Java 测试和 10 项前端测试；另用本地计算器完成 YAML 配置到 Langfuse 的导出、回读验证，没有调用外部模型。复现使用 `mvn package` 后运行 `python3 experiments/trace_verification.py`，该脚本会真实调用模型和天气 API，并保存限长内容预览。可读案例见 [Trace 阅读指南](docs/07-reading-agent-traces.md#10-用真实-trace-复盘)。
 
 ## 系统架构
 
@@ -228,7 +230,7 @@ tail -f logs/agent.log
 
 打开本目录的 `pom.xml`，选择 **Open as Project**，使用 WSL JDK 作为 Project SDK。若已打开整个仓库，可在 Maven 工具窗口选择 **Link Maven Projects** 并选中这个 `pom.xml`。同步后，运行 [`WebMain.java`](src/main/java/dev/learning/agent/app/WebMain.java) 的 `main` 方法，即可启动浏览器服务。
 
-程序使用 `System.getenv` 读取启动 Java 进程时已有的环境变量。WSL 交互式 Bash 会读取 `~/.bashrc`，IDEA 的运行进程可能由其他环境启动，因此终端里有 key 并不代表运行配置也有。不要在终端打印 key 来排查；可用下面的命令只检查是否存在：
+模型与搜索客户端目前使用 `System.getenv` 读取启动 Java 进程时已有的环境变量；Trace 配置由 Spring 解析 `application.yml` 中的环境变量占位符。WSL 交互式 Bash 会读取 `~/.bashrc`，IDEA 的运行进程可能由其他环境启动，因此终端里有 key 并不代表运行配置也有。不要在终端打印 key 来排查；可用下面的命令只检查是否存在：
 
 ```bash
 if [ -n "$DEEPSEEK_API_KEY" ]; then echo "DeepSeek key 已设置"; else echo "DeepSeek key 未设置"; fi

@@ -27,8 +27,8 @@ class OtelTelemetryTest {
     private final SdkTracerProvider provider = SdkTracerProvider.builder()
             .addSpanProcessor(SimpleSpanProcessor.create(exporter)).build();
     private final OpenTelemetrySdk sdk = OpenTelemetrySdk.builder().setTracerProvider(provider).build();
-    private OtelTelemetryFactory factory(boolean learning) {
-        return new OtelTelemetryFactory(sdk, new TraceContentPolicy(learning, Map.of("TEST_KEY", "secret-sentinel")),
+    private OtelTelemetryFactory factory() {
+        return new OtelTelemetryFactory(sdk, new TraceContentPolicy(),
                 "http://127.0.0.1:3035", "test-project", "test-release");
     }
     @AfterEach void close() { sdk.close(); }
@@ -61,7 +61,7 @@ class OtelTelemetryTest {
             case PLAN_EXECUTE -> new PlanExecuteRunner(tools, new DefaultReActEngine(tools));
         };
         ExecutionRequest request = new ExecutionRequest(UUID.randomUUID(), "question-sentinel", ModelSettings.defaults());
-        var trace = factory(false).open("safe-session", request, mode, model.protocol());
+        var trace = factory().open("safe-session", request, mode, model.protocol());
         var context = RunContexts.create(request.requestId(), mode, model, tools, event -> {}, (k,c,s,r) -> false, trace);
         try (var ignored = trace.activate()) {
             RunResult result = runner.run(request, context);
@@ -94,8 +94,10 @@ class OtelTelemetryTest {
                 assertEquals(mode.name(), value(span, "langfuse.observation.metadata.mode"));
                 assertTrue(span.hasEnded());
                 assertTrue(span.getEndEpochNanos() <= root.getEndEpochNanos());
-                assertFalse(span.getAttributes().toString().contains("question-sentinel"));
             }
+            var input = new ObjectMapper().readTree(value(root, "langfuse.observation.input"));
+            assertEquals("question-sentinel", input.path("questionPreview").asText());
+            assertNull(value(root, "agent_loop.content.mode"));
             assertNull(root.getAttributes().get(AttributeKey.longKey("gen_ai.usage.input_tokens")));
             assertFalse(Span.current().getSpanContext().isValid());
         }
@@ -119,8 +121,8 @@ class OtelTelemetryTest {
         assertEquals(StatusCode.UNSET, plan.getStatus().getStatusCode());
         assertEquals(3, type("generation").size());
     }
-    @Test void bashAndReasoningNeverLeakIntoLearningPreviewsIncludingRoot() {
-        var trace = factory(true).open("session", new ExecutionRequest(UUID.randomUUID(), "ordinary task", ModelSettings.defaults()), AgentMode.REACT, "Chat Completions");
+    @Test void bashAndReasoningNeverLeakIntoPreviewsIncludingRoot() {
+        var trace = factory().open("session", new ExecutionRequest(UUID.randomUUID(), "ordinary task", ModelSettings.defaults()), AgentMode.REACT, "Chat Completions");
         var request = new ModelRequest(List.of(ChatMessage.user("private history sentinel")), ModelSettings.defaults(), List.of(), OutputMode.TEXT, 64, ModelUse.EXECUTOR);
         try (var active = trace.activate()) {
             try (var model = trace.model(request, new RunScope("REACT", null, 0), 1)) {
@@ -137,7 +139,7 @@ class OtelTelemetryTest {
         assertTrue(trace.contentRestricted());
     }
     @Test void bashInsideAJsonPlanAlsoRestrictsContentBeforeGenerationEnds() {
-        var trace = factory(true).open("session", new ExecutionRequest(UUID.randomUUID(), "task", ModelSettings.defaults()), AgentMode.REWOO, "Chat Completions");
+        var trace = factory().open("session", new ExecutionRequest(UUID.randomUUID(), "task", ModelSettings.defaults()), AgentMode.REWOO, "Chat Completions");
         var request = new ModelRequest(List.of(ChatMessage.user("task")), ModelSettings.defaults(), List.of(), OutputMode.JSON_OBJECT, 64, ModelUse.CONTROL);
         try (var active = trace.activate(); var span = trace.model(request, new RunScope("PLAN", null, 0), 1)) {
             trace.modelFinished(span, text("{\"tool\":\"bash\",\"command\":\"PLAN_COMMAND_SENTINEL\"}"));
@@ -145,7 +147,7 @@ class OtelTelemetryTest {
         assertFalse(exporter.getFinishedSpanItems().toString().contains("PLAN_COMMAND_SENTINEL"));
     }
     @Test void expectedNeedsInputAndDeniedOutcomesAreNotInfrastructureErrors() {
-        var trace = factory(false).open("session", new ExecutionRequest(UUID.randomUUID(), "task", ModelSettings.defaults()), AgentMode.REACT, "Chat Completions");
+        var trace = factory().open("session", new ExecutionRequest(UUID.randomUUID(), "task", ModelSettings.defaults()), AgentMode.REACT, "Chat Completions");
         try (var active = trace.activate(); var tool = trace.tool("weather_forecast", "{}", "E1", null, new RunScope("REACT", null, 0))) {
             trace.toolFinished(tool, new ToolResult(ToolStatus.NEEDS_INPUT, "candidates", "LOCATION_AMBIGUOUS", true, false, false));
             trace.completed(new RunResult(ExecutionStatus.NEEDS_INPUT, CompletionCheck.UNVERIFIED, "which city?", "NEEDS_INPUT", new RunCounters(0,1,1,0,0)));
@@ -153,7 +155,7 @@ class OtelTelemetryTest {
         assertTrue(exporter.getFinishedSpanItems().stream().allMatch(s -> s.getStatus().getStatusCode() == StatusCode.UNSET));
     }
     @Test void concurrentRunsKeepIndependentContextAndIdentifiers() {
-        var factory = factory(false);
+        var factory = factory();
         var futures = new ArrayList<CompletableFuture<Void>>();
         for (int i=0;i<2;i++) {
             final String session = "session-" + i;
@@ -168,15 +170,10 @@ class OtelTelemetryTest {
             assertEquals(value(child,"test.session"), value(child,"langfuse.session.id"));
         assertEquals(2, type("agent").stream().map(SpanData::getTraceId).distinct().count());
     }
-    @Test void configurationIsOptInAndRejectsUnsafeEndpointsWithoutPrintingKeys() {
-        assertSame(TelemetryFactory.NOOP, OtelTelemetryFactory.fromEnvironment(Map.of()));
-        var config = new HashMap<>(Map.of("AGENT_TRACING_ENABLED","true","LANGFUSE_PUBLIC_KEY","secret-sentinel","LANGFUSE_SECRET_KEY","secret-sentinel","LANGFUSE_BASE_URL","http://example.com"));
-        var error = assertThrows(IllegalArgumentException.class, () -> OtelTelemetryFactory.fromEnvironment(config));
-        assertFalse(error.getMessage().contains("secret-sentinel"));
-    }
-    @Test void previewsMaskKnownKeysAndPreserveValidBoundedUnicode() {
-        var policy = new TraceContentPolicy(true, Map.of("TEST_KEY","secret-sentinel"));
-        assertFalse(policy.preview("secret-sentinel",false).contains("secret-sentinel"));
+    @Test void previewsKeepContentUnmodifiedAndPreserveValidBoundedUnicode() {
+        var policy = new TraceContentPolicy();
+        assertEquals("secret-sentinel", policy.preview("secret-sentinel", false));
+        assertEquals("Bearer token-sentinel", policy.preview("Bearer token-sentinel", false));
         String preview = policy.preview("天气🌤".repeat(3000),false);
         assertTrue(preview.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 4096);
         assertTrue(preview.endsWith("[truncated]"));
@@ -192,14 +189,14 @@ class OtelTelemetryTest {
         assertFalse(usage.has("reasoning_output_tokens"));
     }
     @Test void escapedControlCharactersCannotExpandAnUnboundedPreview() throws Exception {
-        var policy=new TraceContentPolicy(true,Map.of());
+        var policy=new TraceContentPolicy();
         String preview=policy.preview("\u0000\"\\".repeat(3000),false);
         String encoded=new ObjectMapper().writeValueAsString(preview);
         assertTrue(encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8).length<=4096);
         assertEquals(preview,new ObjectMapper().readValue(encoded,String.class));
     }
     @Test void usageAlreadyReportedSurvivesAFailedStreamAndRemainsMarkedIncomplete() {
-        var trace=factory(false).open("session",new ExecutionRequest(UUID.randomUUID(),"task",ModelSettings.defaults()),AgentMode.REACT,"Chat Completions");
+        var trace=factory().open("session",new ExecutionRequest(UUID.randomUUID(),"task",ModelSettings.defaults()),AgentMode.REACT,"Chat Completions");
         var request=new ModelRequest(List.of(ChatMessage.user("task")),ModelSettings.defaults(),List.of(),OutputMode.TEXT,64,ModelUse.EXECUTOR);
         try(var active=trace.activate();var span=trace.model(request,new RunScope("REACT",null,0),1)) {
             trace.modelUsage(span,new TokenUsage(100L,0L,40L,null,null,TokenUsage.InputAccounting.INCLUDES_CACHE),false);

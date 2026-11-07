@@ -64,15 +64,17 @@ flowchart LR
 
 `pom.xml` 引入固定版本的 `io.opentelemetry:opentelemetry-bom:1.67.0`，管理 `opentelemetry-api`、`opentelemetry-sdk`、`opentelemetry-exporter-otlp`；测试使用同版 `opentelemetry-sdk-testing`。只建立 TracerProvider，不额外启动 Metrics / Logs exporter。GenAI 字段集中在 observability 映射实现，记录上述规范提交，不为少量 Development 属性引入另一套实验依赖。
 
-| 环境变量 | 设计值 / 默认值 |
-| --- | --- |
-| `AGENT_TRACING_ENABLED` | 默认 `false`；关闭时使用 Noop 实现。 |
-| `LANGFUSE_BASE_URL` | 本机 `http://127.0.0.1:3035`；远程实例必须 HTTPS。 |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | 新建 `agent-loop-learning` 项目的 key，只从环境读取。 |
-| `LANGFUSE_PROJECT_ID` | 可选，仅用于生成页面链接，不承担认证。 |
-| `AGENT_TRACE_CONTENT` | `metadata` 默认；`learning` 显式开启下文限定的教学内容。 |
-| `AGENT_TRACE_SAMPLE_RATIO` | 学习环境默认 `1.0`，采用 ParentBased + TraceIdRatioBased。 |
-| `AGENT_RELEASE` | 可选，构建版本或 Git commit；不在请求中运行 Git。 |
+Trace 配置集中在 `src/main/resources/application.yml`，由 `TracingProperties` 绑定并交给 `TelemetryConfiguration` 初始化。YAML 支持下列环境变量占位符，也支持 Spring 标准的属性覆盖。
+
+| YAML 配置 | 默认值 / 用途 | 环境变量覆盖 |
+| --- | --- | --- |
+| `agent.tracing.enabled` | `true`；关闭时使用 Noop 实现。 | `AGENT_TRACING_ENABLED` |
+| `agent.tracing.langfuse.base-url` | `http://127.0.0.1:3035`；远程实例必须 HTTPS。 | `LANGFUSE_BASE_URL` |
+| `agent.tracing.langfuse.project-id` | 可选，仅用于生成页面链接，不承担认证。 | `LANGFUSE_PROJECT_ID` |
+| `agent.tracing.sample-ratio` | `1.0`，采用 ParentBased + TraceIdRatioBased。 | `AGENT_TRACE_SAMPLE_RATIO` |
+| `agent.tracing.release` | `1.0-SNAPSHOT`；构建版本或 Git commit，不在请求中运行 Git。 | `AGENT_RELEASE` |
+
+`agent.tracing.langfuse.public-key` / `secret-key` 在 YAML 中分别引用 `${LANGFUSE_PUBLIC_KEY:}` / `${LANGFUSE_SECRET_KEY:}`，由 Spring 解析并绑定；开启 Trace 时必须提供，真实值不写入仓库。启用 Trace 后统一采集限长内容预览，没有独立的内容模式开关。
 
 OTel 实现使用 `OtlpHttpSpanExporter`，将完整 traces endpoint 设置为 **`http://127.0.0.1:3035/api/public/otel/v1/traces`**。程序在内存中对项目 public key 与 secret key 做 Basic Auth 编码，并设置 **`x-langfuse-ingestion-version: 4`**。不要将编码后的凭据打印到日志、拼入浏览器响应或保存到仓库。
 
@@ -80,7 +82,7 @@ Resource 设置 `service.name=agent-loop-learning`、`service.version`、`deploy
 
 批量导出初始参数：队列 2048、每批 256、间隔 1 秒、单次导出超时 5 秒。Spring 关闭时有界 flush / shutdown，总等待最多 5 秒。业务路径不逐条同步 flush；导出失败不能改变 RunResult、占用 Agent 调用预算或阻止 RunLease 释放。开启 tracing 却缺少 key / endpoint 不合法时，启动阶段明确报配置错误；运行期间后端不可用由 SDK 报导出失败，聊天照常执行。进程被强杀或队列满仍可能丢 span，首版不承诺可靠投递。
 
-已创建独立项目 `agent-loop-learning`，项目级 key 保存在仓库外 `~/.config/langfuse/agent-loop.env`，权限 `0600`。已有 `native.env` / `session.env` 继续服务 Codex，不混用。`./run-with-tracing.sh` 加载该文件；`AGENT_TRACE_ENV_FILE` 可覆盖路径，调用者显式设置的 `AGENT_TRACE_CONTENT` 优先。
+已创建独立项目 `agent-loop-learning`，项目级 key 保存在仓库外 `~/.config/langfuse/agent-loop.env`，权限 `0600`。已有 `native.env` / `session.env` 继续服务 Codex，不混用。`./run-with-tracing.sh` 加载该文件；`AGENT_TRACE_ENV_FILE` 可覆盖路径。脚本只加载私有环境文件并启动应用，配置解析由 Spring 完成。
 
 ## 4. 一条 trace 的边界
 
@@ -222,7 +224,7 @@ P&E 的 review 若返回 REVISE，仍在同一 review span 上记录 decision=RE
 | output / reasoning | reasoning 是 output 的子集，不重复增加 output。 |
 | usage 为空或流中断 | 只记录确实收到的值，标记 incomplete / unknown；不把缺失值改为 0。 |
 
-Chat / Responses / Anthropic 的具体口径以 [DeepSeek 对应接口定义](https://api-docs.deepseek.com/guides/anthropic_api/)及有缓存命中的受控报文验证为准，不能因为协议兼容就套用另一家服务的全部计费规则。保留脱敏后的原始计数字段与 accounting 来源，方便追查转换。
+Chat / Responses / Anthropic 的具体口径以 [DeepSeek 对应接口定义](https://api-docs.deepseek.com/guides/anthropic_api/)及有缓存命中的受控报文验证为准，不能因为协议兼容就套用另一家服务的全部计费规则。保留原始计数字段与 accounting 来源，方便追查转换。
 
 OTel 总量与子集可并存；若设置 `langfuse.observation.usage_details`，必须提供不重叠的明细及明确 total，例如 total input=100、cached=40 时，未缓存 input=60、cached=40；output=20，其中 reasoning=5，则普通 output=15、reasoning=5、总量=120。**不能填 input=100、cached=40 后又让后端相加。** 先用固定样本回读 `usageDetails` 验证转换，再开放成本统计。仅对 GENERATION 求和；根和 phase 不重复填 usage。
 
@@ -249,13 +251,13 @@ COMPLETE 只说明执行契约完成。当前 RunResult 往往是 `CompletionChe
 
 ## 8. 内容采集边界
 
-默认 `metadata` 模式仍有有意义的 JSON 输入输出：根 input 为问题长度、模式、模型等摘要，output 为状态、回答长度、计数；模型 span 是消息数、工具数、结束原因，工具 span 是状态、证据 ID、来源数。它能解释结构和性能，不上传完整会话、system prompt、reasoning、搜索正文或天气原始响应。
+启用 Trace 后统一记录结构化摘要与限长内容预览。根 input 为问题长度、模式、模型及问题预览，output 为状态、回答长度与回答预览；模型 span 记录消息数、工具数、结束原因及文本输出预览，工具 span 记录状态、证据 ID、来源数。calculator / weather 的参数与结果、步骤摘要也通过内容策略处理，没有仅记录元数据的分支。
 
-`learning` 模式允许当前用户问题、calculator / weather 的受控参数与结果、步骤摘要和最终回答的脱敏限长预览。首版不导出全量 ModelRequest / 历史，也不导出 reasoning 正文；reasoning 的长度、用量与是否存在仍可观察。内容上限每个预览 4 KiB、每个 span 合计 16 KiB，截断后标记，JSON 结构保持有效。
+内容不做脱敏替换。当前仍不导出全量 ModelRequest / 历史、system prompt、reasoning、Bash 或搜索正文；reasoning 的长度与用量可观察。每个预览上限约 4 KiB，截断后标记，JSON 结构保持有效。
 
 **Bash 命令原文和原始输出始终不进入遥测。** 两次确认等待只记录 kind / outcome / 时长。内容策略还必须处理旁路：模型返回的 Bash 调用参数、后续历史、异常消息和最终回答可能包含命令或输出。工具白名单过滤先于序列化；一旦本轮涉及 Bash（含模型 JSON 计划中提及 Bash），本 Session 后续自由文本预览关闭，根输出只保存结果摘要。测试用哨兵内容检查模型 span、根、event、HTTP 与 exporter 中均没有泄漏，不能只检查工具 span。
 
-不采集任何认证头、会话访问 Header、环境变量、URL query、异常完整响应体。来源 URL 只保留允许的 scheme / host / path，去掉 query 与 fragment。密钥过滤必须发生在数据进入 span 前，日志也执行同一约束；不能指望后端替应用补救。
+不采集任何认证头、会话访问 Header、环境变量、URL query、异常完整响应体。来源 URL 只保留允许的 scheme / host / path，去掉 query 与 fragment。认证信息不作为遥测采集字段；正文预览保持原文，仅执行长度限制和上述内容范围约束。
 
 ## 9. 代码改造清单
 
@@ -264,7 +266,7 @@ COMPLETE 只说明执行契约完成。当前 RunResult 往往是 `CompletionChe
 | 位置 | 改动与职责 |
 | --- | --- |
 | `core/runtime/RunTelemetry`、`TraceSpan`、`TelemetryFactory`、`ExternalObserver` | 小型运行期接口；根 / phase / model / tool 操作使用明确的描述与结果类型，提供 Noop。业务层不依赖 Langfuse 字段。 |
-| `observability/TelemetryConfiguration` | Spring 初始化 SDK、exporter、Resource；校验环境配置，管理 shutdown。 |
+| `observability/TelemetryConfiguration` | Spring 绑定 YAML 配置，初始化 SDK、exporter、Resource，管理 shutdown。 |
 | `observability/OtelRunTelemetry`、`OtelSpan` | 创建 span、保存 Context、激活作用域、复制固定上下文、保证根只结束一次。 |
 | `observability/OtelTelemetryFactory`、`UsageMapping` | 固定规范快照与两套字段映射；自定义字段统一前缀。 |
 | `observability/TraceContentPolicy` | 依据 typed 输入构造白名单摘要 / 预览，不接受任意对象整体序列化。 |
@@ -339,7 +341,7 @@ langfuse --env ~/.config/langfuse/agent-loop.env api observations list \
 
 原生 OTel Java SDK / BOM 固定为 `1.67.0`，直接向本机 Langfuse `4.46.0` 导出 HTTP/protobuf，未安装第二套 Langfuse SDK。独立项目名为 `agent-loop-learning`，项目 ID 为 `cmvytzpya0003oe078lhvii2k`。密钥只在仓库外的私有配置中；这里的项目 ID 不具有认证能力。
 
-在项目目录运行 `./run-with-tracing.sh` 即可使用已配置的 metadata 模式。页面每轮回答和轨迹摘要均有 Trace 入口；日志记录 requestId / traceId。教学预览需显式运行 `AGENT_TRACE_CONTENT=learning ./run-with-tracing.sh`。三种执行模式仍逐轮选择，只在运行中只读。
+在项目目录运行 `./run-with-tracing.sh`，脚本加载私有环境文件，Spring 从 `application.yml` 读取 Trace 配置。启用后统一采集限长内容预览。页面每轮回答和轨迹摘要均有 Trace 入口；日志记录 requestId / traceId。三种执行模式仍逐轮选择，只在运行中只读。
 
 实际实现采用四个 runtime 接口与一个 observability 包：前者表达运行事实，后者拥有 SDK、内容策略和字段映射。未把 OTel / Langfuse 类型放入天气服务或算法包。每次外部 HTTP span 持续到 body / SSE 关闭；取消回调只关闭资源，不在回调线程关闭另一个线程的 Scope。
 
@@ -351,7 +353,7 @@ langfuse --env ~/.config/langfuse/agent-loop.env api observations list \
 | 真实模型与天气 | 三协议 × 三模式 × calculator / weather 共 **18/18** 完成；模型均为 deepseek-flash、reasoning off。每条新 trace 都经 CLI 回读，校验根、类型、父子关系、模型与工具计数、Session 和缓存用量。 |
 | 最终映射复查 | 修改未知分项与流中间用量处理后，分别重跑三个协议的计算任务；回读确认最终 usage_complete=true，未知分项省略，分项之和等于 total。流失败时保留已知中间用量由确定性测试覆盖。 |
 | 浏览器 | 真实 ReAct 地点歧义 → 同会话切换 ReWOO 补全北京行政区 → COMPLETE。运行中模式只读，结束恢复选择；两条 Trace 链接均可打开，390px 无水平溢出，应用 JS 异常为 0。 |
-| 默认内容模式 | CLI 回读上述两轮及最终三协议样例，正文预览均为空；歧义轮只有地点 GET、无预报 GET、无 ERROR；补充后有两次 GET，观测 Session 相同。 |
+| 历史元数据采集记录 | 当时 CLI 回读上述两轮及最终三协议样例，正文预览均为空；歧义轮只有地点 GET、无预报 GET、无 ERROR；补充后有两次 GET，观测 Session 相同。 |
 | 后端不可用 | 将 exporter 指向不可达的本机端口，真实计算仍 COMPLETE，RunLease 释放；进程退出实测 5.39 秒，包含 Spring 清理，SDK 等待有 5 秒上限。 |
 
 真实矩阵脚本为 `experiments/trace_verification.py`，输出在 Git 忽略目录 `target/trace-verification/`。脚本只回读自己刚产生的已知 Trace，不查询 Codex 项目的对话。浏览器测试环境缺少中文字体，截图中文字显示受限；中文 DOM 与交互断言通过。
@@ -372,10 +374,19 @@ Langfuse 会将 TOOL 名显示为 `weather_forecast` / `calculator`，原始 SDK
 
 Chat / Responses 原始 input 含缓存；Anthropic 的 input 不含缓存。实测出现非零 cache read，归一化及不重复累计均通过。Token 只在 GENERATION 上记录。本机 DeepSeek 价格未匹配，费用为空，尚不能作为货币成本报告。
 
-最终三协议计算复查为 [Chat Completions](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/4c9d3e526a51571135cd609572630a1a)、[Responses](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/d750f056166ab0f7003efe03309eb0bd)、[Anthropic](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/37e9f54376389605752442f84506e744)。每条为 2 个 GENERATION、1 个 TOOL、2 个模型 HTTP、共 6 个 span，均使用默认 metadata 模式。Chat 的最终用量可能附在带 choice 的最后数据帧，因此解析器在收到正常结束标记并完成组装后，再明确标记 usage 完整；不只依赖空 choices 的 usage 帧。
+最终三协议计算复查为 [Chat Completions](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/4c9d3e526a51571135cd609572630a1a)、[Responses](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/d750f056166ab0f7003efe03309eb0bd)、[Anthropic](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/37e9f54376389605752442f84506e744)。每条为 2 个 GENERATION、1 个 TOOL、2 个模型 HTTP、共 6 个 span，这些历史样例当时仅采集元数据。Chat 的最终用量可能附在带 choice 的最后数据帧，因此解析器在收到正常结束标记并完成组装后，再明确标记 usage 完整；不只依赖空 choices 的 usage 帧。
 
 ### 11.4 尚未验证或继续保留的边界
 
 此次没有真实运行 Bash 或 Exa 搜索；其代码埋点已接入，审批、脱敏及相关工具行为由确定性测试覆盖。真实重规划、复杂失败恢复、High / Max、其他模型和长期负载不在此次矩阵中。探索巴黎地点消歧时曾出现 Solver 引用待补充证据而被校验拒绝，已记录为 FAILED trace；这说明流程失败可定位，不代表模型层面所有地点补充都能成功。
 
 完整历史 / 提示词 / reasoning、原始 Bash / 搜索正文均不导出，这是内容策略的明确边界。采样、内存队列和非可靠投递保持原设计；关闭 tracing 使用 Noop。此次完成 tracing，不额外部署 Metrics / Logs 管道、Collector 或评测服务。
+
+
+### 11.4 YAML 配置迁移（2026-11-07）
+
+`application.properties` 已迁移为 `application.yml`。Trace 默认开启，`TracingProperties` 绑定 `agent.tracing` 下的开关、采样率、版本和 Langfuse 地址、项目 ID、凭据；凭据通过 YAML 环境变量占位符解析，工厂不再直接读取环境变量。内容模式分支和脱敏替换已删除，统一保存限长内容预览，既有 Bash 内容范围约束继续生效。
+
+`mvn clean package` 通过 161 项 Java 测试，前端 10 项测试通过。新增测试覆盖 YAML 默认值、占位符解析、Spring 属性覆盖、关闭时的 Noop、配置校验和真实 OTLP HTTP 导出。
+
+本机 Langfuse [配置迁移验证 Trace](http://127.0.0.1:3035/project/cmvytzpya0003oe078lhvii2k/traces/b245027742c1d98996192fb354f635f2) 已经 CLI 回读：1 个根、1 个本地 calculator 工具，输入 `1+2`、输出 `3`、状态 COMPLETE，父子关系正确，问题和回答预览存在。该验证没有调用外部模型或天气 API。
